@@ -1,0 +1,5 @@
+[DB Path Verification]
+app.py:   data/movie.db (Line 12)
+debug_wc.py: data/movie.db (Line 9)
+storage/repository.py: Initialized with path passed from app.py
+All consistent and correct.

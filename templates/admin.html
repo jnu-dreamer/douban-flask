@@ -1,0 +1,224 @@
+{% extends "base.html" %}
+{% block title %}豆瓣电影 - 后台管理{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-lg-8">
+
+        <!-- 数据源切换器 -->
+        <div class="card shadow rounded-3 border-0 mb-4">
+            <div class="card-header bg-white py-3 border-bottom d-flex justify-content-between align-items-center">
+                <h5 class="m-0 fw-bold text-success"><i class="fas fa-database me-2"></i>数据源管理</h5>
+                <span class="badge bg-success">当前表: {{ current_table }}</span>
+            </div>
+            <div class="card-body p-4">
+                <form action="{{ url_for('switch_table') }}" method="post" class="row g-3 align-items-end">
+                    <div class="col-md-8">
+                        <label for="tableName" class="form-label fw-bold">选择数据表</label>
+                        <select class="form-select" id="tableName" name="table_name">
+                            {% for table in tables %}
+                            <option value="{{ table }}" {% if table==current_table %}selected{% endif %}>
+                                {{ table }}
+                            </option>
+                            {% endfor %}
+                        </select>
+                        <div class="form-text">切换后，所有页面将展示选定表的数据。</div>
+                    </div>
+                    <div class="col-md-4">
+                        <div class="d-grid">
+                            <button type="submit" class="btn btn-outline-success">
+                                <i class="fas fa-exchange-alt me-2"></i> 切换数据表
+                            </button>
+                        </div>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <div class="card shadow rounded-3 border-0">
+            <div class="card-header bg-white py-3 border-bottom">
+                <h5 class="m-0 fw-bold text-primary">爬虫控制台 (Crawler Console)</h5>
+            </div>
+            <div class="card-body p-4">
+
+                <div class="alert alert-light border shadow-sm mb-4">
+                    <h6 class="alert-heading fw-bold"><i class="fas fa-info-circle text-info"></i> 操作说明</h6>
+                    <ul class="mb-0 small text-muted ps-3">
+                        <li>爬取过程可能需要 30秒 - 3分钟，视页数而定。</li>
+                        <li>建议每次爬取间隔 1 分钟以上，防止 IP 被封禁。</li>
+                    </ul>
+                </div>
+
+                <form id="crawlForm">
+                    <!-- 1. 模式选择 -->
+                    <div class="mb-4">
+                        <label class="form-label fw-bold">模式选择</label>
+                        <div class="btn-group w-100" role="group">
+                            <input type="radio" class="btn-check" name="crawl_type" id="type_top250" value="top250"
+                                checked>
+                            <label class="btn btn-outline-primary" for="type_top250">Top 250 榜单</label>
+
+                            <input type="radio" class="btn-check" name="crawl_type" id="type_tag" value="tag">
+                            <label class="btn btn-outline-primary" for="type_tag">按类型/标签搜索</label>
+                        </div>
+                    </div>
+
+                    <!-- 2. 类型输入 (默认隐藏) -->
+                    <div id="tagInputGroup" class="mb-4 bg-light p-3 rounded" style="display: none;">
+                        <label for="tagname" class="form-label fw-bold">请输入电影类型</label>
+                        <input type="text" class="form-control" id="tagname" name="tag" placeholder="例如：喜剧, 科幻, 动作...">
+                        <div class="form-text">支持输入任意豆瓣标签。建议输入标准类型名称。</div>
+                    </div>
+
+                    <!-- 3. 选项配置 -->
+                    <div class="row g-3 mb-4">
+                        <div class="col-md-6">
+                            <label for="pages" class="form-label fw-bold">爬取页数</label>
+                            <select class="form-select" id="pages" name="pages">
+                                <option value="1">1 页 (约20部)</option>
+                                <option value="3">3 页 (约60部)</option>
+                                <option value="5">5 页 (约100部)</option>
+                                <option value="10" selected>10 页 (完整榜单 / 约200部)</option>
+                            </select>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label fw-bold">数据存储策略</label>
+                            <div class="form-check mt-2">
+                                <input class="form-check-input" type="checkbox" id="no_clear" name="no_clear">
+                                <label class="form-check-label" for="no_clear">
+                                    保留旧数据 (追加模式)
+                                </label>
+                            </div>
+                            <div class="form-text small">未勾选时默认会清空旧数据。</div>
+                        </div>
+                    </div>
+
+                    <!-- 4. 提交按钮 -->
+                    <div class="d-grid">
+                        <button type="submit" id="btnSubmit" class="btn btn-primary btn-lg">
+                            <i class="fas fa-play me-2"></i> 开始爬取
+                        </button>
+                    </div>
+                </form>
+
+                <!-- 状态反馈区 -->
+                <div id="statusArea" class="mt-4" style="display: none;">
+                    <div class="alert alert-primary d-flex align-items-center border-0 shadow-sm" role="alert">
+                        <div class="spinner-border text-primary me-3" role="status" id="loadingSpinner">
+                            <span class="visually-hidden">Loading...</span>
+                        </div>
+                        <div>
+                            <h6 class="fw-bold mb-1" id="statusTitle">正在初始化...</h6>
+                            <p class="mb-0 small" id="statusText">请保持页面开启...</p>
+                        </div>
+                    </div>
+                    <!-- 进度条 (可接收动态更新) -->
+                    <div class="progress mt-2" style="height: 5px;">
+                        <div id="progressBar" class="progress-bar progress-bar-striped progress-bar-animated"
+                            role="progressbar" style="width: 0%"></div>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+{{ super() }}
+<script>
+    // 标签输入框的 UI 切换
+    document.querySelectorAll('input[name="crawl_type"]').forEach((elem) => {
+        elem.addEventListener("change", function (event) {
+            const tagGroup = document.getElementById('tagInputGroup');
+            tagGroup.style.display = event.target.value === "tag" ? "block" : "none";
+        });
+    });
+
+    // 轮询逻辑
+    let pollInterval;
+
+    function startPolling() {
+        pollInterval = setInterval(() => {
+            fetch('/api/progress')
+                .then(r => r.json())
+                .then(data => {
+                    const statusText = document.getElementById('statusText');
+                    const statusTitle = document.getElementById('statusTitle');
+                    const progressBar = document.getElementById('progressBar');
+
+                    statusText.innerText = data.message;
+
+                    if (data.total > 0) {
+                        const pct = Math.round((data.current / data.total) * 100);
+                        progressBar.style.width = pct + "%";
+                    }
+
+                    if (data.status === 'finished') {
+                        clearInterval(pollInterval);
+                        statusTitle.innerText = "完成！";
+                        statusTitle.className = "fw-bold mb-1 text-success";
+                        document.getElementById('loadingSpinner').style.display = "none";
+                        setTimeout(() => {
+                            alert("爬取成功！");
+                            window.location.href = "{{ url_for('index') }}";
+                        }, 1000);
+                    } else if (data.status === 'error') {
+                        clearInterval(pollInterval);
+                        statusTitle.innerText = "出错";
+                        statusTitle.className = "fw-bold mb-1 text-danger";
+                        document.getElementById('loadingSpinner').style.display = "none";
+                        document.getElementById('btnSubmit').disabled = false;
+                    }
+                });
+        }, 1000);
+    }
+
+    // 表单提交
+    document.getElementById('crawlForm').addEventListener('submit', function (e) {
+        e.preventDefault();
+
+        const formData = new FormData(this);
+        const data = {};
+        formData.forEach((value, key) => data[key] = value);
+        data['no_clear'] = document.getElementById('no_clear').checked;
+
+        if (data.crawl_type === 'tag' && !data.tag) {
+            alert("请输入类型名称！");
+            return;
+        }
+
+        // UI 重置
+        const btn = document.getElementById('btnSubmit');
+        const statusArea = document.getElementById('statusArea');
+
+        btn.disabled = true;
+        statusArea.style.display = 'block';
+        document.getElementById('progressBar').style.width = "0%";
+        document.getElementById('statusTitle').innerText = "正在启动...";
+        document.getElementById('statusTitle').className = "fw-bold mb-1 text-primary";
+        document.getElementById('loadingSpinner').style.display = "block";
+
+        fetch('/api/crawl', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(data)
+        })
+            .then(response => response.json())
+            .then(res => {
+                if (res.status === 'success') {
+                    startPolling();
+                } else {
+                    alert("启动失败: " + res.message);
+                    btn.disabled = false;
+                }
+            })
+            .catch(err => {
+                console.error(err);
+                alert("请求失败");
+                btn.disabled = false;
+            });
+    });
+</script>
+{% endblock %}

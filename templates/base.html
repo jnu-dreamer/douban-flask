@@ -1,0 +1,251 @@
+<!doctype html>
+<html lang="zh-CN">
+
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <title>{% block title %}豆瓣电影可视化{% endblock %}</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link href="{{ url_for('static', filename='assets/css/custom.css') }}" rel="stylesheet">
+  <!-- Crypto icons for cool buttons if needed, or stick to BI -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css">
+  <style>
+    /* body styles moved to custom.css */
+
+    .nav-link.active {
+      font-weight: 700;
+    }
+
+    footer {
+      margin-top: 4rem;
+      padding: 2rem 0;
+      color: #6c757d;
+    }
+
+    /* Custom Navbar Alignment Logic */
+    @media (min-width: 992px) {
+      .navbar-brand-wrapper {
+        position: absolute;
+        left: 1.5rem;
+        top: 50%;
+        transform: translateY(-50%);
+        z-index: 1030;
+      }
+
+      .navbar-admin-wrapper {
+        position: absolute;
+        right: 1.5rem;
+        top: 50%;
+        transform: translateY(-50%);
+        z-index: 1030;
+      }
+
+      .navbar-collapse {
+        justify-content: center;
+        width: 100%;
+      }
+    }
+  </style>
+  {% block head_extra %}{% endblock %}
+</head>
+
+<body class="d-flex flex-column min-vh-100">
+  <!-- Navbar -->
+  <nav class="navbar navbar-expand-lg navbar-dark bg-dark shadow-sm sticky-top position-relative">
+    <div class="container-fluid px-4">
+
+      <!-- 1. 品牌与侧边栏开关 (桌面端绝对定位在左侧) -->
+      <div class="navbar-brand-wrapper d-flex align-items-center">
+        <button class="btn text-white me-3 border-0" type="button" data-bs-toggle="offcanvas"
+          data-bs-target="#sidebarMenu" aria-controls="sidebarMenu">
+          <i class="bi bi-list fs-3"></i>
+        </button>
+        <a class="navbar-brand fw-bold" href="{{ url_for('index') }}">
+          <i class="bi bi-film me-2"></i>豆瓣电影
+        </a>
+      </div>
+
+      <!-- 移动端导航折叠开关 -->
+      <button class="navbar-toggler ms-auto" type="button" data-bs-toggle="collapse" data-bs-target="#nav"
+        aria-controls="nav" aria-expanded="false" aria-label="Toggle navigation">
+        <span class="navbar-toggler-icon"></span>
+      </button>
+
+      <div class="collapse navbar-collapse" id="nav">
+        <!-- 2. Centered Container for Content Alignment -->
+        <div class="container d-flex flex-column flex-lg-row justify-content-lg-between align-items-lg-center">
+
+          <!-- Left: Page Navigation -->
+          <ul class="navbar-nav mb-2 mb-lg-0">
+            <li class="nav-item"><a class="nav-link {% if request.endpoint=='movie' %}active{% endif %}"
+                href="{{ url_for('movie') }}">电影列表</a></li>
+            <li class="nav-item"><a class="nav-link {% if request.endpoint=='analysis' %}active{% endif %}"
+                href="{{ url_for('analysis') }}">数据大屏</a></li>
+          </ul>
+
+          <!-- 右侧: 仅搜索框 (管理按钮已移至最右侧) -->
+          <ul class="navbar-nav align-items-center">
+            <!-- 条件判断: 在首页和搜索页隐藏顶部搜索框，避免重复 -->
+            {% if request.endpoint not in ['index', 'home', 'search'] %}
+            <li class="nav-item">
+              <form action="{{ url_for('search') }}" method="get" class="d-flex w-100" role="search">
+                <div class="input-group rounded-pill overflow-hidden bg-light" style="width: 350px; max-width: 100%;">
+                  <input class="form-control form-control-sm bg-transparent border-0 ps-3" type="search" name="q"
+                    placeholder="搜索电影、导演..." aria-label="Search">
+                  <button class="btn btn-sm btn-primary px-3" type="submit"><i class="bi bi-search"></i></button>
+                </div>
+              </form>
+            </li>
+            {% endif %}
+          </ul>
+
+        </div>
+
+        <!-- 3. 管理与帮助 (桌面端绝对定位在右侧) -->
+        <div class="navbar-admin-wrapper d-none d-lg-flex gap-3">
+          <a class="btn btn-link nav-link text-white-50 p-0" href="{{ url_for('help') }}">
+            <i class="bi bi-question-circle-fill me-1"></i>帮助
+          </a>
+          <a class="btn btn-link nav-link text-white-50 p-0" href="{{ url_for('admin') }}">
+            <i class="bi bi-gear-fill me-1"></i>管理
+          </a>
+        </div>
+        <!-- 移动端管理与帮助入口 (在折叠菜单内) -->
+        <div class="d-lg-none mt-3 border-top pt-3">
+          <a class="nav-link mb-2" href="{{ url_for('help') }}"><i class="bi bi-question-circle-fill me-1"></i>帮助说明</a>
+          <a class="nav-link" href="{{ url_for('admin') }}"><i class="bi bi-gear-fill me-1"></i>后台管理</a>
+        </div>
+
+      </div>
+    </div>
+  </nav>
+
+  <!-- Sidebar (Offcanvas) -->
+  <div class="offcanvas offcanvas-start bg-white text-dark shadow border-0" tabindex="-1" id="sidebarMenu"
+    aria-labelledby="sidebarMenuLabel" style="width: 300px;">
+
+    <!-- Header with Gradient -->
+    <div class="offcanvas-header text-white" style="background: linear-gradient(135deg, #4e73df 0%, #224abe 100%);">
+      <h5 class="offcanvas-title fw-bold" id="sidebarMenuLabel"><i class="bi bi-film me-2"></i>豆瓣电影</h5>
+      <button type="button" class="btn-close btn-close-white" data-bs-dismiss="offcanvas" aria-label="Close"></button>
+    </div>
+
+    <div class="offcanvas-body p-0">
+
+      <!-- Main Navigation -->
+      <div class="py-3">
+        <h6 class="px-4 text-uppercase text-muted small fw-bold mb-2 ls-1">导航菜单 (Menu)</h6>
+        <div class="list-group list-group-flush">
+          <a href="{{ url_for('index') }}"
+            class="list-group-item list-group-item-action border-0 px-4 py-3 d-flex align-items-center {% if request.endpoint=='index' %}bg-light text-primary fw-bold{% endif %}">
+            <i class="bi bi-house-door me-3 fs-5"></i>回到首页
+          </a>
+          <a href="{{ url_for('movie') }}"
+            class="list-group-item list-group-item-action border-0 px-4 py-3 d-flex align-items-center {% if request.endpoint=='movie' %}bg-light text-primary fw-bold{% endif %}">
+            <i class="bi bi-collection-play me-3 fs-5"></i>电影列表
+          </a>
+          <a href="{{ url_for('analysis') }}"
+            class="list-group-item list-group-item-action border-0 px-4 py-3 d-flex align-items-center {% if request.endpoint=='analysis' %}bg-light text-primary fw-bold{% endif %}">
+            <i class="bi bi-bar-chart-line me-3 fs-5"></i>数据大屏
+          </a>
+          <a href="{{ url_for('admin') }}"
+            class="list-group-item list-group-item-action border-0 px-4 py-3 d-flex align-items-center {% if request.endpoint=='admin' %}bg-light text-primary fw-bold{% endif %}">
+            <i class="bi bi-gear me-3 fs-5"></i>后台管理
+          </a>
+          <a href="{{ url_for('aboutMe') }}"
+            class="list-group-item list-group-item-action border-0 px-4 py-3 d-flex align-items-center {% if request.endpoint=='aboutMe' %}bg-light text-primary fw-bold{% endif %}">
+            <i class="bi bi-info-circle me-3 fs-5"></i>关于项目
+          </a>
+        </div>
+      </div>
+
+      <hr class="my-0 opacity-25">
+
+      <!-- 快速标签云 -->
+      <div class="py-4 px-4">
+        <h6 class="text-uppercase text-muted small fw-bold mb-3 ls-1">快速分类 (Tags)</h6>
+        <div class="d-flex flex-wrap gap-2">
+          {% set tags = [
+          ('剧情', 'Drama', 'primary'), ('喜剧', 'Comedy', 'success'),
+          ('动作', 'Action', 'danger'), ('爱情', 'Romance', 'pink'),
+          ('科幻', 'Sci-Fi', 'info'), ('动画', 'Animation', 'warning'),
+          ('悬疑', 'Mystery', 'dark'), ('惊悚', 'Thriller', 'secondary'),
+          ('犯罪', 'Crime', 'danger')
+          ] %}
+
+          {% for cn, en, color in tags %}
+          <a href="{{ url_for('search', q=cn) }}" class="btn btn-sm btn-outline-secondary rounded-pill border px-3">
+            {{ cn }}
+          </a>
+          {% endfor %}
+        </div>
+      </div>
+
+      <!-- 底部信息 -->
+      <div class="mt-auto p-4 bg-light border-top">
+        <div class="d-flex align-items-center mb-2">
+          <div class="avatar bg-primary text-white rounded-circle me-3 d-flex align-items-center justify-content-center"
+            style="width: 40px; height: 40px;">
+            <i class="bi bi-person-fill"></i>
+          </div>
+          <div>
+            <div class="fw-bold text-dark small">Douban Viz</div>
+            <div class="text-muted small" style="font-size: 0.75rem;">Python Flask Project</div>
+          </div>
+        </div>
+        <div class="text-muted small mt-2" style="font-size: 0.75rem;">
+          &copy; 2024 Designed by Antigravity
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <main class="container py-4 flex-grow-1">
+    {% block content %}{% endblock %}
+  </main>
+
+  <footer class="bg-white border-top mt-auto">
+    <div class="container text-center text-muted">
+      <small>豆瓣电影数据可视化 · Flask + Jinja · Designed by Antigravity</small>
+    </div>
+  </footer>
+
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+
+  <!-- 回到顶部按钮 -->
+  <button type="button" class="btn btn-primary rounded-circle shadow-lg p-0 d-none" id="btn-back-to-top"
+    style="position: fixed; bottom: 30px; right: 30px; width: 50px; height: 50px; z-index: 1050; transition: opacity 0.3s;">
+    <i class="bi bi-arrow-up fs-4"></i>
+  </button>
+
+  <script>
+    // 全局初始化 Bootstrap Tooltips
+    var tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'))
+    var tooltipList = tooltipTriggerList.map(function (tooltipTriggerEl) {
+      return new bootstrap.Tooltip(tooltipTriggerEl)
+    })
+
+    // 回到顶部按钮逻辑
+    const btnBackToTop = document.getElementById("btn-back-to-top");
+
+    window.onscroll = function () {
+      if (document.body.scrollTop > 300 || document.documentElement.scrollTop > 300) {
+        btnBackToTop.classList.remove("d-none");
+        btnBackToTop.style.opacity = "1";
+      } else {
+        btnBackToTop.style.opacity = "0";
+        setTimeout(() => {
+          if (btnBackToTop.style.opacity === "0") btnBackToTop.classList.add("d-none");
+        }, 300);
+      }
+    };
+
+    btnBackToTop.addEventListener("click", function () {
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    });
+  </script>
+  {% block scripts %}{% endblock %}
+</body>
+
+</html>
