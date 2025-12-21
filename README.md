@@ -1,122 +1,100 @@
-# 🎬 豆瓣电影数据可视分析系统 (Douban Movie Analysis)
+# 🎬 豆瓣电影数据可视分析系统 | Douban Data Viz
 
-欢迎使用豆瓣电影数据可视分析系统！这是一个基于 Python 的实战项目，旨在帮助初学者理解如何**爬取网站数据**、**存储数据**并将其**可视化展示**。
-
-本项目集成了网络爬虫（Spider）、Web开发（Flask）、数据库（SQLite）和数据可视化（ECharts）等多种技术。
+> **本项目**是一个基于 Python Flask 全栈开发的电影数据爬取与可视化分析平台。旨在通过完整的数据工程流程（爬取 -> 存储 -> 分析 -> 展示），帮助开发者理解现代 Web 应用的数据流转与架构设计。
 
 ---
 
-## 🌟 项目功能亮点
+## 🏗️ 项目架构剖析 (Architecture Analysis)
 
-### 1. 数据爬取 (Crawler)
-- **Top 250 榜单**：一键爬取豆瓣评分最高的 250 部电影，获取高质量数据。
-- **自定义分类**：支持按类型爬取（如“喜剧”、“科幻”），不再局限于榜单。
-- **深度信息**：自动抓取电影的**导演**、**主演**、**评分**、**简介**等详细信息。
+本项目采用了经典的 **MVC (Model-View-Controller)** 设计模式的变体，将系统解耦为数据获取层、业务逻辑层和表现层。
 
-### 2. 可视化仪表盘 (Dashboard)
-- **首页概览**：实时展示收录电影总数、平均分和时间跨度。
-- **多维分析**：
-    - **类型分布**：通过饼图查看哪种类型的电影最多。
-    - **产地分布**：通过柱状图了解电影主要来自哪些国家。
-    - **全球地图**：在世界地图上直观展示电影的产地来源。
+### 1. 数据获取层 (Data Ingestion)
+- **核心组件**: `spider/douban_spider.py`
+- **实现原理**: 
+    - 使用 `urllib.request` 发送伪装请求（User-Agent 模拟）。
+    - 结合 `BeautifulSoup4` 解析 DOM 树，提取电影元数据（导演、主演、评分等）。
+    - 针对 Top250 和 Tag 分类采用不同的 API 策略（分页爬取 vs JSON 接口），实现了对豆瓣反爬机制的初步规避（随机延迟）。
 
-### 3. 数据探索与导出
-- **全库搜索**：支持按**片名**、**导演**、**演员**或**类型**进行模糊搜索。
-- **Excel 导出**：一键将数据库中的所有电影数据导出为 Excel 表格，方便二次处理。
+### 2. 数据持久化层 (Persistence)
+- **核心组件**: `storage/repository.py`
+- **实现原理**:
+    - 采用 **SQLite** 轻量级数据库，无需额外部署服务器。
+    - 封装了 `MovieRepository` 类，实现了 **DAO (Data Access Object)** 模式。
+    - 提供了即时的数据 CRUD 接口，支持动态建表、数据清洗与批量插入。
 
----
+### 3. Web 服务层 (Service & Controller)
+- **核心组件**: `app.py`
+- **实现原理**:
+    - 基于 **Flask** 框架构建 RESTful 风格的路由。
+    - 实现了基础的 **RBAC 权限控制**（简易版），通过装饰器 `@login_required` 保护管理后台。
+    - 后端直接处理 Pandas/Numpy 数据聚合逻辑，为前端提供清洗后的 JSON 数据接口。
 
-## 📂 项目结构说明
-
-对于初学者，了解文件结构非常有帮助：
-
-```
-douban_movies_top250/
-├── app.py                  # [核心] Web 应用的主程序，运行它来启动网页
-├── main.py                 # [核心] 数据爬虫的入口，运行它来抓取数据
-├── spider/                 # 爬虫模块文件夹
-│   └── douban_spider.py    # 具体的爬虫逻辑代码
-├── storage/                # 数据存储模块文件夹
-│   └── repository.py       # 负责与数据库交互（保存数据）
-├── templates/              # [前端] HTML 网页模板文件夹
-│   ├── index.html          # 首页仪表盘
-│   ├── movie.html          # 电影列表页
-│   ├── analysis.html       # 多维分析页 (含地图)
-│   ├── search.html         # 搜索结果页
-│   └── base.html           # 网页的基础骨架 (导航栏等)
-├── static/                 # [前端] 静态资源文件夹
-│   └── assets/
-│       └── css/            # 样式文件 (控制网页好不好看)
-│           └── custom.css  # 我们编写的自定义样式
-├── data/                   # 数据存放目录
-│   └── movie.db            # SQLite 数据库文件 (自动生成)
-└── requirements.txt        # 项目依赖库列表
-```
+### 4. 数据可视化层 (Visualization)
+- **核心组件**: `templates/analysis.html`, `static/js`
+- **实现原理**:
+    - 深度集成 **ECharts 5.0**，实现响应式图表渲染。
+    - **词云生成**: 结合 `jieba` 分词与 `WordCloud` 库，动态分析电影简介与类型的语义权重。
+    - 前后端分离的数据交互：前端通过 AJAX 异步请求后端 API，实现无刷新图表更新。
 
 ---
 
-## 🚀 快速开始
+## 🧩 核心功能模块
 
-### 第一步：环境准备
-确保你的电脑上安装了 Python（建议 3.8 以上）。在项目根目录下安装依赖：
-
-```bash
-pip install -r requirements.txt
-```
-
-### 第二步：抓取数据
-在启动网站之前，我们需要先抓取一些数据。
-
-**1. 抓取 Top 250 完整榜单 (推荐)**
-```bash
-python main.py
-```
-*这会抓取豆瓣 Top 250 的全部 10 页数据。*
-
-**2. (可选) 抓取特定类型，例如“喜剧”**
-```bash
-python main.py --type tag --tag 喜剧 --no-clear
-```
-*`--no-clear` 表示保留原有数据，将新数据追加进去。*
-
-### 第三步：启动网站
-数据抓取完成后，运行以下命令启动 Web 服务器：
-
-```bash
-python app.py
-```
-
-### 第四步：访问体验
-打开浏览器，访问地址：
-👉 **http://127.0.0.1:5000/**
+| 模块名称 | 功能描述 | 技术关键词 |
+| :--- | :--- | :--- |
+| **数据大屏** | 多维度分析电影分布（类型、产地、年代） | ECharts, Pandas |
+| **智能爬虫** | 支持 Top250 榜单与自定义标签（如“科幻”）抓取 | BS4, Multithreading |
+| **全文检索** | 对数据库百万级字符进行模糊匹配搜索 | SQL Like, Jinja2 |
+| **语义分析** | 对剧情简介进行分词并生成词云画像 | Jieba, WordCloud |
+| **后台管理** | 可视化控制爬虫启停、进度监控与数据源切换 | Ajax Polling, Session |
 
 ---
 
-## 📖 技术原理解析 (写给初学者)
+## 🛠️ 技术栈 (Tech Stack)
 
-### 1. 爬虫是怎么工作的？ (`spider/`)
-爬虫就像一个自动化的浏览器。它向豆瓣服务器发送请求（Request），拿到网页的代码（HTML），然后像剥洋葱一样分析代码（BeautifulSoup），提取出我们想要的电影名、评分等信息。
-
-### 2. 数据存在哪里？ (`storage/` & `data/`)
-我们使用 **SQLite** 数据库。它是一个轻量级的文件数据库，不需要复杂的安装，所有数据都存在 `movie.db` 文件里。`repository.py` 负责把爬到的数据整齐地放进数据库表中。
-
-### 3. 网页是怎么显示的？ (`app.py` & `templates/`)
-- **Flask** 是一个 Web 框架，它负责根据用户的网址请求（如 `/search`），去数据库里查数据。
-- **Jinja2** 模板引擎负责把查到的数据“填空”到 HTML 文件里（比如把电影名填到表格中）。
-- **浏览器** 最终渲染出漂亮的网页给我们看。
-
-### 4. 图表是怎么画出来的？ (`static/`)
-我们使用了 **ECharts**，这是一个强大的 JavaScript 图表库。后端（Flask）把统计好的数字传给前端，前端的 JavaScript 代码调用 ECharts 把这些数字画成饼图、地图。
+*   **Language**: Python 3.8+
+*   **Web Framework**: Flask (Jinja2)
+*   **Database**: SQLite3
+*   **Crawler**: XML/HTML Parser (BeautifulSoup4)
+*   **Visualization**: ECharts, WordCloud
+*   **Frontend**: Bootstrap 5, jQuery (Minimal)
+*   **Data Analysis**: Numpy, Pandas (Basic)
 
 ---
 
-## 🛠 常见问题
+## 🚀 快速启动
 
-**Q: 爬取时出现 403 Forbidden 错误？**
-A: 豆瓣有反爬机制。我们在 `main.py` 中默认设置了 1 秒的延迟 (`--delay 1.0`) 以降低被封禁风险。如果遇到封禁，请稍等一段时间再试，或尝试更换网络环境。
+1.  **安装依赖环境**
+    ```bash
+    pip install -r requirements.txt
+    ```
 
-**Q: 搜索不到刚爬取的电影？**
-A: 请确保爬虫脚本 (`main.py`) 成功运行并显示 "Saved ... movies"。然后重启一下 `app.py` 确保应用加载了最新数据。
+2.  **获取初始数据**
+    ```bash
+    # 爬取 Top 250 数据
+    python main.py
+    ```
+
+3.  **启动可视化服务**
+    ```bash
+    python app.py
+    ```
+    访问 [http://127.0.0.1:5000](http://127.0.0.1:5000) 即可查看大屏。
 
 ---
-*祝您学习愉快！如果有任何代码上的问题，可以随时查看源码，注释里有很多细节说明。*
+
+## 📂 项目目录规约
+
+```text
+douban_flask/
+├── app.py              # Web 应用入口 (Controller)
+├── main.py             # 爬虫任务入口 (CLI)
+├── analysis/           # 数据分析算法包
+├── spider/             # 爬虫策略实现包
+├── storage/            # 数据库操作封装包
+├── templates/          # 前端视图模板 (View)
+└── static/             # 静态资源 (CSS/JS/Images)
+```
+
+---
+

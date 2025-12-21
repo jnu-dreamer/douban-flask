@@ -1,71 +1,91 @@
-import re
-import time
-import urllib.error
-import urllib.request
-from typing import Dict, List, Optional
-
-from bs4 import BeautifulSoup
+import re # 用于正则匹配
+import time # 用于延迟
+import urllib.error # 用于处理URL请求异常
+import urllib.request # 用于处理URL请求
+from urllib.parse import quote # URL编码
+from typing import Dict, List, Optional # 用于类型提示
+from bs4 import BeautifulSoup # 用于解析HTML
 
 
 class DoubanSpider:
     """豆瓣电影列表爬虫 (支持 Top250 或指定标签)."""
-
-    def __init__(self, base_url: str = "https://movie.douban.com/top250", tag: str = "", pages: int = 10, delay: float = 0.0):
+    def __init__(self, base_url: str = "https://movie.douban.com/top250", tag: str = "", pages: int = 10, limit: int = 200, delay: float = 1.0):
         self.base_url = base_url.rstrip("/")
         self.tag = tag
         if self.tag:
-            self.base_url = f"https://movie.douban.com/tag/{urllib.request.quote(self.tag)}"
+            # base_url 用作HTTP请求头的Referer，API请求用作URL
+            self.base_url = f"https://movie.douban.com/tag/{quote(self.tag)}"
         
         self.pages = pages
+        self.limit = limit
         self.delay = delay
-        self.headers = {
+        self.headers = { # 设置HTTP头，伪装为Chrome浏览器
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
         }
         # 例如: "123456 人评价"
-        self.rating_count_pattern = re.compile(r"(\d+)\s*人评价")
+        self.rating_count_pattern = re.compile(r"(\d+)\s*人评价") # 匹配评价人数
         # 例如: "1994 / 美国 / 剧情 犯罪" (Top250 标准格式)
-        self.meta_pattern = re.compile(r"(\d{4})\s*/\s*([^/]+)\s*/\s*(.+)")
+        self.meta_pattern = re.compile(r"(\d{4})\s*/\s*([^/]+)\s*/\s*(.+)") # 匹配年份、国家、类型
 
-    def fetch(self, progress_callback=None) -> List[Dict[str, str]]:
-        """Fetch pages and return a list of movie dicts."""
-        records: List[Dict[str, str]] = []
-        for i in range(self.pages):
-            if progress_callback:
-                progress_callback(i + 1, self.pages)
+    def fetch(self, progress_callback=None, save_callback=None) -> List[Dict[str, str]]:
+        """抓取豆瓣电影列表，返回电影字典列表
+        Args:
+            progress_callback: 进度回调函数
+            save_callback: 数据保存回调函数 (batch_data -> None)
+        """
+        records: List[Dict[str, str]] = [] 
+        
+        # 模式一：标签搜索 (API 一次性请求)
+        if self.tag:
+            url = f"https://movie.douban.com/j/search_subjects?type=movie&tag={quote(self.tag)}&sort=recommend&page_limit={self.limit}&page_start=0"
+            self.headers.update({"Referer": f"https://movie.douban.com/tag/{quote(self.tag)}"})
             
-            start = i * 20 if self.tag else i * 25
-            if self.tag:
-                 # API 使用 page_limit=20
-                url = f"https://movie.douban.com/j/search_subjects?type=movie&tag={urllib.request.quote(self.tag)}&sort=recommend&page_limit=20&page_start={start}"
-                self.headers.update({"Referer": f"https://movie.douban.com/tag/{urllib.request.quote(self.tag)}"})
-            else:
-                # Top250 使用 ?start=0
+            print(f"Fetching API {url} ...")
+            if progress_callback:
+                progress_callback(1, 1)
+
+            content = self._get(url)
+            if content:
+                batch = self._parse_json(content)
+                if save_callback:
+                    print(f"  > Saving {len(batch)} records...")
+                    save_callback(batch)
+                records.extend(batch)
+                
+        # 模式二：Top 250 (网页分页抓取)
+        else:
+            for i in range(self.pages):  # 循环，从第0页到第self.pages-1页
+                if progress_callback:
+                    progress_callback(i + 1, self.pages) # 更新进度
+                
+                start = i * 25
                 url = f"{self.base_url}?start={start}"
                 self.headers.update({"Referer": "https://movie.douban.com/top250"})
 
-            print(f"Fetching {url} ...")
-            content = self._get(url)
-            if not content:
-                continue
-            
-            if self.tag:
-                records.extend(self._parse_json(content))
-            else:
-                records.extend(self._parse(content))
+                print(f"Fetching {url} ...")
+                content = self._get(url)
+                if not content:
+                    continue
                 
-            if self.delay:
-                time.sleep(self.delay)
+                batch = self._parse(content)
+                if save_callback:
+                     print(f"  > Saving {len(batch)} records...")
+                     save_callback(batch)
+                records.extend(batch)
+                    
+                if self.delay:
+                    time.sleep(self.delay)
         return records
 
     def _get(self, url: str) -> str:
         request = urllib.request.Request(url, headers=self.headers)
         try:
-            with urllib.request.urlopen(request) as resp:
+            # 设置超时时间为 5 秒，防止长时间卡死
+            with urllib.request.urlopen(request, timeout=5) as resp:
                 return resp.read().decode("utf-8")
-        except urllib.error.URLError as e:
-            reason = getattr(e, "reason", e)
-            code = getattr(e, "code", "")
-            print(f"Request failed ({code}): {reason} for {url}")
+        except Exception as e:
+            # 捕获超时或其他错误
+            print(f"Request Error for {url}: {e}")
             return ""
 
     def _parse_json(self, json_str: str) -> List[Dict[str, str]]:
@@ -81,89 +101,94 @@ class DoubanSpider:
                 info_link = sub.get("url", "")
                 
                 # 获取详情以补充缺失字段
-                detail_rated = ""
-                detail_intro = ""
-                detail_country = ""
-                detail_year = sub.get("year", "") # 后备
-                detail_category = ""
-                directors_str = "" # 后备
-                actors_str = "" # 后备
-                
-                if info_link:
-                    try:
-                        time.sleep(1.0) # Be nice
-                        detail_html = self._get(info_link)
-                        if detail_html:
-                            detail_soup = BeautifulSoup(detail_html, "html.parser")
-                            
-                            # 提取简介
-                            related_info = detail_soup.find("div", class_="related-info")
-                            if related_info:
-                                span = related_info.find("span", property="v:summary")
-                                if span:
-                                    detail_intro = span.get_text(strip=True)
-
-                            # Extract Meta (Country, Year) from #info
-                            info_div = detail_soup.find("div", id="info")
-                            if info_div:
-                                text = info_div.get_text()
-                                # Country (制片国家/地区:)
-                                if "制片国家/地区:" in text:
-                                    parts = text.split("制片国家/地区:")
-                                    if len(parts) > 1:
-                                        detail_country = parts[1].split("\n")[0].strip()
-                                
-                                # Year (if not in JSON)
-                                if "上映日期:" in text or "首播:" in text:
-                                    y_parts = re.findall(r"(\d{4})", text)
-                                    if y_parts:
-                                        detail_year = y_parts[0]
-
-                            # 1. 提取评价人数 (v:votes) - 关键字段 "XX人评价"
-                            vote_tag = detail_soup.find("span", property="v:votes")
-                            detail_rated = vote_tag.get_text(strip=True) if vote_tag else ""
-
-                            # 2. 提取类型 (v:genre) - 关键字段 Analysis/Labels
-                            # JSON 只给出搜索标签, 我们需要所有类型 (例如 "剧情 犯罪")
-                            genre_tags = detail_soup.find_all("span", property="v:genre")
-                            detail_category = " ".join([t.get_text(strip=True) for t in genre_tags])
-
-                            # 3. 提取演职员表 (Directors/Actors) - 如果 JSON 为空则补充
-                            # JSON 通常包含这些, 但详情页更权威.
-                            # 仅在 JSON 为空或为了完整性时更新.
-                            # 导演 (v:directedBy 非标准, 通常解析文本或 rel)
-                            # 简单方法: JSON 数据对名字通常没问题, 但如果为空则检查 #info.
-                            if not directors_str:
-                                bus = detail_soup.find_all("a", rel="v:directedBy")
-                                directors_str = " ".join([b.get_text(strip=True) for b in bus])
-                            
-                            if not actors_str:
-                                acts = detail_soup.find_all("a", rel="v:starring")
-                                # 限制前5名以避免数据库膨胀
-                                actors_str = " ".join([a.get_text(strip=True) for a in acts[:5]])
-
-                    except Exception as e:
-                        print(f"Failed to fetch details for {info_link}: {e}")
+                print(f"  > Fetching details for {sub.get('title', '')} ...")
+                details = self._get_movie_details(info_link)
 
                 records.append({
                     "info_link": info_link,
                     "pic_link": sub.get("cover", ""),
                     "cname": sub.get("title", ""),
                     "score": sub.get("rate", "0"),
-                    "rated": detail_rated,  # Use scraped votes
-                    "introduction": detail_intro,
-                    "year_release": sub.get("year") or detail_year, 
-                    "country": detail_country, 
-                    "category": detail_category if detail_category else self.tag, # Prefer full genres
-                    "directors": directors_str,
-                    "actors": actors_str,
+                    "rated": details["rated"], 
+                    "introduction": details["introduction"],
+                    "year_release": sub.get("year") or details["year"], 
+                    "country": details["country"], 
+                    "category": details["category"] if details["category"] else self.tag, 
+                    "directors": details["directors"],
+                    "actors": details["actors"],
                 })
         except json.JSONDecodeError:
             print("Failed to decode JSON response")
         return records
 
-    def _parse(self, html: str) -> List[Dict[str, str]]:
-        soup = BeautifulSoup(html, "html.parser")
+    def _get_movie_details(self, url: str) -> Dict[str, str]:
+        """抓取电影详情页，获取完整信息"""
+        details = {
+            "introduction": "", "country": "", "year": "", "category": "",
+            "rated": "", "directors": "", "actors": ""
+        }
+        if not url:
+            return details
+            
+        try:
+            time.sleep(0.5) # 缩短延迟到 0.5s，并在下方 _get 增加了超时控制
+            html = self._get(url)
+            if not html:
+                return details
+                
+            soup = BeautifulSoup(html, "html.parser")
+            
+            # 1. 简介 (v:summary)
+            related_info = soup.find("div", class_="related-info")
+            if related_info:
+                span = related_info.find("span", property="v:summary")
+                if span:
+                    # 处理可能存在的 <br>
+                    details["introduction"] = span.get_text(strip=True)
+
+            # 2. Meta 信息 (#info)
+            info_div = soup.find("div", id="info")
+            if info_div:
+                text = info_div.get_text()
+                # 制片国家/地区
+                if "制片国家/地区:" in text:
+                    parts = text.split("制片国家/地区:")
+                    if len(parts) > 1:
+                        details["country"] = parts[1].split("\n")[0].strip()
+                
+                # 上映年份 (优先从 JSON 或 List 获取，这里作为补充)
+                if "上映日期:" in text or "首播:" in text:
+                    y_parts = re.findall(r"(\d{4})", text)
+                    if y_parts:
+                        details["year"] = y_parts[0]
+
+            # 3. 评价人数 (v:votes)
+            vote_tag = soup.find("span", property="v:votes")
+            if vote_tag:
+                 details["rated"] = vote_tag.get_text(strip=True)
+
+            # 4. 类型 (v:genre) -  获取完整类型列表
+            genre_tags = soup.find_all("span", property="v:genre")
+            if genre_tags:
+                details["category"] = " ".join([t.get_text(strip=True) for t in genre_tags])
+
+            # 5. 导演 (v:directedBy)
+            bus = soup.find_all("a", rel="v:directedBy")
+            if bus:
+                details["directors"] = " ".join([b.get_text(strip=True) for b in bus])
+            
+            # 6. 主演 (v:starring)
+            acts = soup.find_all("a", rel="v:starring")
+            if acts:
+                details["actors"] = " ".join([a.get_text(strip=True) for a in acts[:5]]) # 仅取前5
+
+        except Exception as e:
+            print(f"Failed to fetch details for {url}: {e}")
+            
+        return details
+
+    def _parse(self, html: str) -> List[Dict[str, str]]: # 解析HTML（top250）
+        soup = BeautifulSoup(html, "html.parser") 
         records: List[Dict[str, str]] = []
         
         items = soup.find_all("div", class_="item")
@@ -180,64 +205,64 @@ class DoubanSpider:
             rating_tag = item.find("span", class_="rating_num")
             score = rating_tag.get_text(strip=True) if rating_tag else ""
 
-            rated = ""
+            # 暂时获取列表页的基础信息作为兜底
+            list_rated = ""
             star_div = item.find("div", class_="star")
             if star_div:
                 m = self.rating_count_pattern.search(star_div.get_text())
                 if m:
-                    rated = m.group(1)
+                    list_rated = m.group(1)
 
-            inq_tag = item.find("span", class_="inq")
-            introduction = inq_tag.get_text(strip=True) if inq_tag else ""
+            # 列表页的简介通常只是短评(quote)，不是真正的简介
+            quote_tag = item.find("span", class_="inq")
+            short_quote = quote_tag.get_text(strip=True) if quote_tag else ""
 
-            year = country = category = ""
-            directors = actors = ""
+            # 解析列表页的元数据 (年份/国家/类型)
+            list_year = list_country = list_category = ""
+            list_directors = list_actors = ""
             
             bd_div = item.find("div", class_="bd")
             if bd_div:
                 p_tag = bd_div.find("p")
-                
-                # 健壮的解析逻辑
                 if p_tag:
-                     # 通常通过 <br> 分隔文本
                     raw_text = str(p_tag)
-                    # 简单的通过 <br> 或 <br/> 分割
                     parts = re.split(r"<br\s*/?>", raw_text)
                     if len(parts) >= 1:
-                        # 第一部分是 导演/演员
-                        # 移除标签
                         line1 = BeautifulSoup(parts[0], "html.parser").get_text(strip=True)
                         if "导演:" in line1:
                             d_parts = line1.split("主演:")
-                            directors = d_parts[0].replace("导演:", "").strip()
+                            list_directors = d_parts[0].replace("导演:", "").strip()
                             if len(d_parts) > 1:
-                                actors = d_parts[1].strip()
-                        
+                                list_actors = d_parts[1].strip()
                     if len(parts) >= 2:
-                        # 第二部分是 Meta 信息
                         line2 = BeautifulSoup(parts[1], "html.parser").get_text(strip=True)
-                         # 1994 / US / Crime
                         m = self.meta_pattern.search(line2)
                         if m:
-                            year = m.group(1).strip()
-                            country = m.group(2).strip()
-                            category = m.group(3).strip()
+                            list_year = m.group(1).strip()
+                            list_country = m.group(2).strip()
+                            list_category = m.group(3).strip()
 
-            records.append(
-                {
-                    "info_link": info_link,
-                    "pic_link": pic_link,
-                    "cname": cname,
-                    "score": score,
-                    "rated": rated,
-                    "introduction": introduction,
-                    "year_release": year,
-                    "country": country,
-                    "category": category,
-                    "directors": directors,
-                    "actors": actors,
-                }
-            )
+            # --- 关键修改：进入详情页抓取完整信息 ---
+            print(f"  > Fetching details for {cname} ...")
+            details = self._get_movie_details(info_link)
+            
+            # 合并逻辑：优先使用详情页信息，列表页信息兜底
+            final_record = {
+                "info_link": info_link,
+                "pic_link": pic_link,
+                "cname": cname,
+                "score": score,
+                "rated": details["rated"] if details["rated"] else list_rated,
+                # 简介：如果有详情页简介则用详情页，否则用 Quote，实在没有为空
+                "introduction": details["introduction"] if details["introduction"] else short_quote,
+                "year_release": details["year"] if details["year"] else list_year,
+                "country": details["country"] if details["country"] else list_country,
+                "category": details["category"] if details["category"] else list_category,
+                "directors": details["directors"] if details["directors"] else list_directors,
+                "actors": details["actors"] if details["actors"] else list_actors,
+            }
+
+            records.append(final_record)
 
         return records
 

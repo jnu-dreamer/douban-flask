@@ -28,7 +28,8 @@
             <td>
               <div class="d-flex align-items-center">
                 <!-- 豆瓣链接 -->
-                <a href="{{ movie[1] }}" target="_blank" class="text-dark fw-bold text-decoration-none text-truncate"
+                <!-- 本地详情页链接 -->
+                <a href="/movie/{{ movie[0] }}" class="text-dark fw-bold text-decoration-none text-truncate"
                   style="max-width: 200px;" title="{{ movie[3] }}">
                   {{ movie[3] }}
                 </a>

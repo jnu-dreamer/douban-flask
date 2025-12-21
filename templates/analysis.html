@@ -29,6 +29,12 @@
             <i class="bi bi-cpu-fill me-2"></i>AI 聚类
         </button>
     </li>
+    <li class="nav-item" role="presentation">
+        <button class="nav-link fw-bold" id="graph-tab" data-bs-toggle="tab" data-bs-target="#graph" type="button"
+            role="tab" aria-controls="graph" aria-selected="false">
+            <i class="bi bi-share-fill me-2"></i>影视关系
+        </button>
+    </li>
 </ul>
 
 <div class="tab-content" id="analysisTabsContent">
@@ -130,12 +136,8 @@
                 <h6 class="m-0 fw-bold text-info">电影语义空间分布图 (Semantic Space)</h6>
                 <div class="d-flex align-items-center">
                     <label class="me-2 small text-muted">聚类数量:</label>
-                    <select id="clusterCount" class="form-select form-select-sm me-3" style="width: auto;">
-                        <option value="10">10类 (粗略)</option>
-                        <option value="12" selected>12类 (标准)</option>
-                        <option value="15">15类 (精细)</option>
-                        <option value="20">20类 (极细)</option>
-                    </select>
+                    <input type="number" id="clusterCount" class="form-control form-control-sm me-3" value="10" min="2"
+                        max="20" style="width: 80px;" title="请输入聚类簇数 (2-20)">
                     <button class="btn btn-sm btn-info text-white" onclick="loadClusterChart()">
                         <i class="bi bi-arrow-clockwise"></i> 重新计算
                     </button>
@@ -146,6 +148,28 @@
                 <div class="mt-3 text-muted small text-center">
                     * 坐标点越接近，说明两部电影的剧情关键词越相似。此图通过 TF-IDF 特征提取 + PCA 降维生成。
                 </div>
+            </div>
+        </div>
+    </div>
+
+
+    <!-- 标签页 4: 影视关系图谱 -->
+    <div class="tab-pane fade" id="graph" role="tabpanel" aria-labelledby="graph-tab">
+        <div class="card shadow mb-4 border-0 rounded-3">
+            <div
+                class="card-header py-3 d-flex flex-row align-items-center justify-content-between bg-white border-bottom">
+                <h6 class="m-0 fw-bold text-indigo" style="color: #6610f2;">导演-演员合作关系图谱 (Relationship Graph)</h6>
+                <div class="d-flex align-items-center">
+                    <span class="badge me-2" style="background-color: #5470c6;">导演</span>
+                    <span class="badge bg-success me-3">演员</span>
+                    <button class="btn btn-sm btn-outline-secondary" onclick="loadGraphChart()">
+                        <i class="bi bi-arrow-clockwise"></i> 刷新
+                    </button>
+                </div>
+            </div>
+            <div class="card-body p-0">
+                <!-- 增加高度以获得沉浸感 -->
+                <div id="graphChart" style="height: 700px; width: 100%;"></div>
             </div>
         </div>
     </div>
@@ -178,7 +202,7 @@
     const yearCounts = JSON.parse(document.getElementById('data-year-counts').textContent);
 
     // 图表实例
-    let mapChart, genreChart, countryChart, scoreChart, yearChart, clusterChart;
+    let mapChart, genreChart, countryChart, scoreChart, yearChart, clusterChart, graphChart;
 
     // ----------------- 标签页 1: 概览图表 -----------------
     function initOverviewCharts() {
@@ -331,6 +355,18 @@
                                 + '坐标: (' + params.value[0].toFixed(2) + ', ' + params.value[1].toFixed(2) + ')';
                         }
                     },
+                    toolbox: {
+                        feature: {
+                            dataZoom: { title: { zoom: '区域缩放', back: '还原' } },
+                            restore: { title: '重置' },
+                            saveAsImage: { title: '保存图片' }
+                        },
+                        right: 20, top: 0
+                    },
+                    dataZoom: [
+                        { type: 'inside', xAxisIndex: 0, filterMode: 'empty' },
+                        { type: 'inside', yAxisIndex: 0, filterMode: 'empty' }
+                    ],
                     legend: { data: data.map(c => c.name), left: 'center', bottom: 10 },
                     xAxis: { type: 'value', scale: true, splitLine: { show: false } },
                     yAxis: { type: 'value', scale: true, splitLine: { show: false } },
@@ -344,10 +380,15 @@
 
                 clusterChart.setOption(option, true);
 
-                // 点击跳转到电影详情
+                // 点击跳转到本地详情页 (而非直接去豆瓣)
                 clusterChart.off('click');
                 clusterChart.on('click', function (params) {
-                    if (params.value && params.value[3]) {
+                    // 数据格式: [x, y, title, link, id]
+                    if (params.value && params.value[4]) {
+                        // 跳转到本地详情页
+                        window.open('/movie/' + params.value[4], '_blank');
+                    } else if (params.value && params.value[3]) {
+                        // 兼容旧数据：直接去豆瓣
                         window.open(params.value[3], '_blank');
                     }
                 });
@@ -359,11 +400,85 @@
     }
 
 
+    // ----------------- 标签页 4: 知识图谱 (新功能) -----------------
+    function loadGraphChart() {
+        if (!graphChart) {
+            graphChart = echarts.init(document.getElementById('graphChart'));
+        }
+
+        graphChart.showLoading();
+
+        fetch('/api/graph/data?limit=80')
+            .then(response => response.json())
+            .then(data => {
+                graphChart.hideLoading();
+
+                const option = {
+                    backgroundColor: '#f8f9fc',
+                    title: {
+                        text: 'Top 80 影人合作网络',
+                        subtext: '节点越大表示作品越多，连线越粗表示合作越密切',
+                        top: 'bottom',
+                        left: 'right'
+                    },
+                    tooltip: {},
+                    legend: [{
+                        data: data.categories.map(function (a) {
+                            return a.name;
+                        })
+                    }],
+                    animationDuration: 1500,
+                    animationEasingUpdate: 'quinticInOut',
+                    series: [
+                        {
+                            type: 'graph',
+                            layout: 'force',
+                            data: data.nodes,
+                            links: data.links,
+                            categories: data.categories,
+                            roam: true,
+                            label: {
+                                show: true,
+                                position: 'right',
+                                formatter: '{b}'
+                            },
+                            draggable: true,
+                            force: {
+                                repulsion: 400,
+                                edgeLength: [50, 200],
+                                gravity: 0.1
+                            },
+                            lineStyle: {
+                                color: 'source',
+                                curveness: 0.3
+                            },
+                            emphasis: {
+                                focus: 'adjacency',
+                                lineStyle: {
+                                    width: 10
+                                }
+                            }
+                        }
+                    ]
+                };
+
+                graphChart.setOption(option);
+            })
+            .catch(error => {
+                graphChart.hideLoading();
+                console.error('Error:', error);
+            });
+    }
+
+
+    // ----------------- 事件监听 -----------------
+
+
     // ----------------- 事件监听 -----------------
 
     // 窗口调整大小时重绘图表
     window.addEventListener('resize', function () {
-        [mapChart, genreChart, countryChart, scoreChart, yearChart, clusterChart].forEach(chart => {
+        [mapChart, genreChart, countryChart, scoreChart, yearChart, clusterChart, graphChart].forEach(chart => {
             if (chart) chart.resize();
         });
     });
@@ -373,6 +488,9 @@
     tabEls.forEach(tabEl => {
         tabEl.addEventListener('shown.bs.tab', function (event) {
             const targetId = event.target.getAttribute('data-bs-target');
+
+            // 核心修改：同步 URL Hash，这样刷新后还能停留在当前 Tab
+            history.replaceState(null, null, targetId);
 
             // 因为之前隐藏了 tab，切换回来时需要重置图表尺寸
             if (targetId === '#overview') {
@@ -387,24 +505,86 @@
                 } else {
                     clusterChart.resize();
                 }
+            } else if (targetId === '#graph') {
+                if (!graphChart) {
+                    loadGraphChart();
+                } else {
+                    graphChart.resize();
+                }
             }
         });
     });
 
     // 处理 Hash 导航 (用于兼容旧的路由跳转)
-    document.addEventListener("DOMContentLoaded", function () {
+    // ----------------- 路由与导航逻辑 -----------------
+
+    // 处理 Hash 导航 (支持 Sidebar 跳转和 URL 直接访问)
+    function handleHashNavigation(event) { // Added event parameter
         const hash = window.location.hash;
+
+        // 1. Hash -> Tab ID 映射
+        const hashToTab = {
+            '#world-map': '#overview',
+            '#genre': '#overview',
+            '#score': '#trends',
+            '#trends': '#trends',
+            '#ai-hub': '#ai-hub',
+            '#graph': '#graph',
+            '#relation': '#graph' // 兼容不同的 hash 命名
+        };
+
+        let tabActivated = false;
+
         if (hash) {
-            const triggerEl = document.querySelector(`button[data-bs-target="${hash}"]`);
+            // 查找归属的 Tab
+            let targetTabId = hashToTab[hash] || hash;
+
+            const triggerEl = document.querySelector(`button[data-bs-target="${targetTabId}"]`);
             if (triggerEl) {
                 const triggerTab = new bootstrap.Tab(triggerEl);
                 triggerTab.show();
+                tabActivated = true;
+
+                // 强制初始化图表 (防止刷新页面时因 Tab 已激活而不触发 shown.bs.tab 事件导致图表空白)
+                if (targetTabId === '#overview') {
+                    initOverviewCharts();
+                    setTimeout(() => [mapChart, genreChart, countryChart].forEach(c => c && c.resize()), 100);
+                } else if (targetTabId === '#trends') {
+                    initTrendCharts();
+                    setTimeout(() => [scoreChart, yearChart].forEach(c => c && c.resize()), 100);
+                } else if (targetTabId === '#ai-hub') {
+                    loadClusterChart();
+                } else if (targetTabId === '#graph') {
+                    loadGraphChart();
+                }
+
+                // 查找具体的滚动目标
+                if (targetTabId !== hash) {
+                    const scrollMapping = {
+                        '#world-map': '#worldMap',
+                        '#genre': '#genreChart',
+                        '#score': '#scoreChart'
+                    };
+                    const selector = scrollMapping[hash] || hash;
+
+                    // 稍微延迟等待 Tab 切换渲染
+                    setTimeout(() => {
+                        const el = document.querySelector(selector);
+                        if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    }, 150);
+                }
             }
         }
 
-        // 初始化默认标签页 (概览)
-        initOverviewCharts();
-    });
+        // 仅在首次加载且无 Hash 时初始化默认视图
+        if (!tabActivated && !hash && event.type === 'DOMContentLoaded') {
+            initOverviewCharts();
+        }
+    }
+
+    // 绑定事件：页面加载完成 + URL Hash 变化
+    document.addEventListener("DOMContentLoaded", handleHashNavigation);
+    window.addEventListener("hashchange", handleHashNavigation);
 
 </script>
 {% endblock %}

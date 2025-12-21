@@ -15,26 +15,37 @@ def run_crawl(
     base_url: str,
     tag: str,
     pages: int,
+    limit: int,
     delay: float,
     db_path: str,
     clear: bool = True,
     verbose: bool = True,
     progress_callback = None
 ) -> None:
-    spider = DoubanSpider(base_url=base_url, tag=tag, pages=pages, delay=delay)
-    movies = spider.fetch(progress_callback)
-    if verbose:
-        print(f"Fetched {len(movies)} movies from {spider.base_url}")
-
+    # Determine table name based on logic
+    table_name = "movies"
+    if tag and not clear:
+        table_name = f"movies_{tag}"
+    
     ensure_dir(db_path)
-    repo = MovieRepository(db_path)
+    repo = MovieRepository(db_path, table_name)
+    
     if clear:
         repo.clear_table()
     else:
         repo.create_table_if_not_exists()
-    saved = repo.save_all(movies)
+
+    # Define incremental save callback
+    def _save_chunk(chunk):
+        saved_count = repo.save_all(chunk)
+        if verbose:
+            print(f"  [Saved {saved_count} records]")
+
+    spider = DoubanSpider(base_url=base_url, tag=tag, pages=pages, limit=limit, delay=delay)
+    movies = spider.fetch(progress_callback, save_callback=_save_chunk)
+    
     if verbose:
-        print(f"Saved {saved} movies to {db_path}")
+        print(f"Fetched total {len(movies)} movies from {spider.base_url}")
 
 
 def parse_args() -> argparse.Namespace:
@@ -48,6 +59,7 @@ def parse_args() -> argparse.Namespace:
     
     # 通用选项
     parser.add_argument("--pages", type=int, default=10, help="爬取页数 (默认: 10). Top 250共10页.")
+    parser.add_argument("--limit", type=int, default=200, help="爬取数量 (仅当 mode='tag' 时生效, 默认: 200).")
     parser.add_argument("--delay", type=float, default=1.0, help="请求间隔 (秒)")
     parser.add_argument("--db", type=str, default=os.path.join("data", "movie.db"), help="数据库保存路径")
     parser.add_argument("--no-clear", action="store_true", help="保留旧数据 (默认: 每次爬取前清空数据)")
@@ -79,6 +91,7 @@ if __name__ == "__main__":
         base_url=base_url,
         tag=tag_arg,
         pages=args.pages,
+        limit=args.limit,
         delay=args.delay,
         db_path=args.db,
         clear=not args.no_clear,

@@ -39,6 +39,20 @@ class MovieRepository:
             conn.execute(f"delete from {self.table_name}")
             conn.commit()
 
+    def rename_table(self, old_name: str, new_name: str) -> None:
+        """重命名数据表"""
+        # 简单验证：只允许字母数字下划线
+        if not new_name.isidentifier():
+             raise ValueError("非法表名，仅支持字母、数字、下划线")
+             
+        with self._connect() as conn:
+            conn.execute(f"ALTER TABLE {old_name} RENAME TO {new_name}")
+            conn.commit()
+            
+        # 如果重命名的是当前操作的表，更新实例变量
+        if self.table_name == old_name:
+            self.table_name = new_name
+
     def save_all(self, records: Iterable[Dict[str, str]]) -> int:
         records_list: List[Dict[str, str]] = list(records)
         if not records_list:
@@ -70,7 +84,7 @@ class MovieRepository:
     # --- 读取方法 (从 app.py 重构而来) ---
 
     def _connect(self):
-        return sqlite3.connect(self.db_path)
+        return sqlite3.connect(self.db_path, timeout=30)
 
     def get_stats(self) -> Dict[str, Any]:
         """获取看板的汇总统计信息."""
@@ -192,6 +206,24 @@ class MovieRepository:
         with self._connect() as conn:
             rows = conn.execute(f"select introduction from {self.table_name}").fetchall()
         return " ".join([r[0] for r in rows if r[0]])
+
+    def get_movie_by_id(self, movie_id: int) -> Optional[Any]:
+        """根据 ID 获取单个电影详情"""
+        with self._connect() as conn:
+            row = conn.execute(f"select * from {self.table_name} where id = ?", (movie_id,)).fetchone()
+            if row:
+                # Convert tuple to dict-like object for easier access if needed, or just return tuple
+                # Tuple structure: id(0), info_link(1), pic_link(2), cname(3), score(4), rated(5), 
+                # introduction(6), year(7), country(8), category(9), directors(10), actors(11)
+                return row
+            return None
+
+    def get_movies_by_ids(self, ids: List[int]) -> List[Any]:
+        """根据 ID 列表批量获取电影"""
+        if not ids: return []
+        placeholders = ",".join(["?"] * len(ids))
+        with self._connect() as conn:
+            return conn.execute(f"select * from {self.table_name} where id in ({placeholders})", ids).fetchall()
 
 
 __all__ = ["MovieRepository"]

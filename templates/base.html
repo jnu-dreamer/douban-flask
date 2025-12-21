@@ -131,7 +131,7 @@
       <button type="button" class="btn-close btn-close-white" data-bs-dismiss="offcanvas" aria-label="Close"></button>
     </div>
 
-    <div class="offcanvas-body p-0">
+    <div class="offcanvas-body p-0 d-flex flex-column">
 
       <!-- Main Navigation -->
       <div class="py-3">
@@ -145,10 +145,47 @@
             class="list-group-item list-group-item-action border-0 px-4 py-3 d-flex align-items-center {% if request.endpoint=='movie' %}bg-light text-primary fw-bold{% endif %}">
             <i class="bi bi-collection-play me-3 fs-5"></i>电影列表
           </a>
-          <a href="{{ url_for('analysis') }}"
-            class="list-group-item list-group-item-action border-0 px-4 py-3 d-flex align-items-center {% if request.endpoint=='analysis' %}bg-light text-primary fw-bold{% endif %}">
-            <i class="bi bi-bar-chart-line me-3 fs-5"></i>数据大屏
+          <!-- 数据大屏 (父菜单) -->
+          <a href="#collapseAnalysis" data-bs-toggle="collapse" role="button"
+            aria-expanded="{% if request.endpoint=='analysis' %}true{% else %}false{% endif %}"
+            aria-controls="collapseAnalysis"
+            class="list-group-item list-group-item-action border-0 px-4 py-3 d-flex align-items-center justify-content-between {% if request.endpoint=='analysis' %}bg-light text-primary fw-bold{% endif %}">
+            <div class="d-flex align-items-center">
+              <i class="bi bi-bar-chart-line me-3 fs-5"></i>数据大屏
+            </div>
+            <i class="bi bi-chevron-down small"></i>
           </a>
+
+          <!-- 数据大屏 (子菜单) -->
+          <div class="collapse {% if request.endpoint in ['analysis'] %}show{% endif %}" id="collapseAnalysis">
+            <div class="list-group list-group-flush bg-white">
+              <a href="{{ url_for('analysis') }}#score"
+                class="list-group-item list-group-item-action border-0 ps-5 py-2 small text-muted">
+                <i class="bi bi-music-note-list me-2"></i>评分分布
+              </a>
+              <a href="{{ url_for('analysis') }}#trends"
+                class="list-group-item list-group-item-action border-0 ps-5 py-2 small text-muted">
+                <i class="bi bi-graph-up me-2"></i>年份走势
+              </a>
+              <a href="{{ url_for('analysis') }}#genre"
+                class="list-group-item list-group-item-action border-0 ps-5 py-2 small text-muted">
+                <i class="bi bi-pie-chart me-2"></i>类型统计
+              </a>
+              <a href="{{ url_for('analysis') }}#ai-hub"
+                class="list-group-item list-group-item-action border-0 ps-5 py-2 small text-muted">
+                <i class="bi bi-cpu me-2"></i>AI 词云 & 聚类
+              </a>
+              <a href="{{ url_for('analysis') }}#world-map"
+                class="list-group-item list-group-item-action border-0 ps-5 py-2 small text-muted">
+                <i class="bi bi-globe me-2"></i>全球产地
+              </a>
+              <a href="{{ url_for('analysis') }}#graph"
+                class="list-group-item list-group-item-action border-0 ps-5 py-2 small text-muted">
+                <i class="bi bi-share me-2"></i>影视关系
+              </a>
+            </div>
+          </div>
+
           <a href="{{ url_for('admin') }}"
             class="list-group-item list-group-item-action border-0 px-4 py-3 d-flex align-items-center {% if request.endpoint=='admin' %}bg-light text-primary fw-bold{% endif %}">
             <i class="bi bi-gear me-3 fs-5"></i>后台管理
@@ -195,7 +232,7 @@
           </div>
         </div>
         <div class="text-muted small mt-2" style="font-size: 0.75rem;">
-          &copy; 2024 Designed by Antigravity
+          &copy; 2024 Designed by Tao Yang & Xingwang Ma
         </div>
       </div>
     </div>
@@ -205,13 +242,15 @@
     {% block content %}{% endblock %}
   </main>
 
-  <footer class="bg-white border-top mt-auto">
+  <footer class="bg-white border-top mt-auto py-3">
     <div class="container text-center text-muted">
-      <small>豆瓣电影数据可视化 · Flask + Jinja · Designed by Antigravity</small>
+      <small>豆瓣电影数据可视化 · Flask + Jinja · Designed by Tao Yang & Xingwang Ma</small>
     </div>
   </footer>
 
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+  <!-- ECharts 核心库 (修复: 图谱页面依赖此库) -->
+  <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
 
   <!-- 回到顶部按钮 -->
   <button type="button" class="btn btn-primary rounded-circle shadow-lg p-0 d-none" id="btn-back-to-top"

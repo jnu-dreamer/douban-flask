@@ -8,6 +8,7 @@ from flask import Flask, render_template, request, session, redirect, url_for, f
 import main
 from storage.repository import MovieRepository
 from analysis.clustering import ClusteringService
+from analysis.graph import GraphService # 新增图谱服务
 
 # ----------------- 配置 -----------------
 DB_PATH = os.path.join("data", "movie.db")
@@ -49,6 +50,20 @@ def movie():
     return render_template("movie.html", movies=movies, page=page, total_pages=total_pages)
 
 
+@app.route("/movie/<int:movie_id>")
+def movie_detail(movie_id):
+    # 1. 获取电影基本信息
+    movie = repo.get_movie_by_id(movie_id)
+    if not movie:
+        return "Movie not found", 404
+        
+    # 2. 获取相似推荐
+    service = ClusteringService(repo)
+    recommendations = service.get_similar_movies(movie_id, n_top=6)
+    
+    return render_template("detail.html", movie=movie, recommendations=recommendations)
+
+
 
 
 
@@ -62,40 +77,28 @@ def word_generate():
     """生成动态词云图片。"""
     try:
         import jieba
+        import jieba.analyse
         from wordcloud import WordCloud
         import numpy as np
         from PIL import Image
 
         # 0. 获取词云类型
         wc_type = request.args.get("type", "category") 
-
-        # 1. 获取文本数据
-        if wc_type == "intro":
-            # 剧情简介文本 (需要 repo 支持)
-            # 从数据库获取所有简介
-            text = repo.get_all_intro_text()
-        else:
-            # 默认按类型分类
-            text = repo.get_all_category_text()
         
-        # 2. 文本分词
-        cut = jieba.cut(text)
-        string = ' '.join(cut)
-
-        # 3. 加载蒙版图 (可选)
-        img_name = 'tree.jpg' if wc_type == 'category' else 'tree.jpg' 
+        # 1. 加载蒙版图
+        img_name = 'tree.jpg' if wc_type == 'category' else 'image.jpg' 
         img_path = os.path.join(app.root_path, 'static', 'assets', 'img', img_name)
         img_array = None
         if os.path.exists(img_path):
             img_array = np.array(Image.open(img_path))
+            # 修复 JPG 压缩噪点：将接近白色的像素 (>240) 强制转为纯白 (255)
+            img_array[img_array > 240] = 255
 
-        # 4. 确定字体路径 (中文显示关键)
-        # 尝试查找有效字体
+        # 2. 确定字体路径
         font_candidates = [
-            "/mnt/c/Windows/Fonts/msyh.ttc",   # WSL access to Windows Fonts (MicroSoft YaHei)
-            "/mnt/c/Windows/Fonts/simhei.ttf", # WSL access to Windows Fonts (SimHei)
-            "msyh.ttc", 
-            "simhei.ttf",
+            "/mnt/c/Windows/Fonts/msyh.ttc",   # WSL access to Windows Fonts
+            "/mnt/c/Windows/Fonts/simhei.ttf", 
+            "msyh.ttc", "simhei.ttf",
             "/usr/share/fonts/truetype/droid/DroidSansFallbackFull.ttf",
             "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
         ]
@@ -105,20 +108,29 @@ def word_generate():
                  font_path = f
                  break
         
-        if not font_path:
-            print("Warning: 未找到中文字体，词云可能显示方框。")
-
         wc = WordCloud(
             background_color='white',
             mask=img_array,
             font_path=font_path
-            # stop_words=stop_words 
         )
         
-        wc.generate_from_text(string)
+        # 3. 处理文本与生成逻辑
+        if wc_type == "intro":
+            # 智能提取关键词 (TF-IDF): 专治简介废话
+            # topK=300: 提取前300个关键词
+            # allowPOS: 只保留名词(n, nz)和动词(v, vn)
+            text = repo.get_all_intro_text()
+            tags = jieba.analyse.extract_tags(text, topK=300, withWeight=True, allowPOS=('n', 'nz', 'v', 'vn'))
+            # 字典 {word: weight} 传入
+            wc.generate_from_frequencies(dict(tags))
+        else:
+            # 默认分类模式: 直接统计频率
+            text = repo.get_all_category_text()
+            cut = jieba.cut(text)
+            string = ' '.join(cut)
+            wc.generate_from_text(string)
 
-        # 5. 输出为字节流
-        # 直接将 WordCloud 转为图片对象
+        # 4. 输出图片
         image = wc.to_image()
         out = BytesIO()
         image.save(out, format='PNG')
@@ -259,6 +271,25 @@ def switch_table():
     return redirect(url_for("admin"))
 
 
+@app.route("/api/rename_table", methods=["POST"])
+@login_required
+def rename_table():
+    old_name = request.form.get("old_name")
+    new_name = request.form.get("new_name")
+    
+    if not old_name or not new_name:
+        flash("表名不能为空", "danger")
+        return redirect(url_for("admin"))
+        
+    try:
+        repo.rename_table(old_name, new_name)
+        flash(f"成功将表 {old_name} 重命名为 {new_name}", "success")
+    except Exception as e:
+        flash(f"重命名失败: {str(e)}", "danger")
+        
+    return redirect(url_for("admin"))
+
+
 # ----------------- API 状态与爬虫 -----------------
 
 STATUS_FILE = "data/status.json"
@@ -304,10 +335,17 @@ def api_crawl():
     crawl_type = data.get("crawl_type", "top250")
     tag = data.get("tag", "")
     pages = int(data.get("pages", 1))
+    limit = int(data.get("limit", 200)) # 获取 limit
     no_clear = data.get("no_clear", False)
     
     initial_status["total"] = pages
     save_status(initial_status)
+    
+    # 自动切换到目标表，确保用户看到的是最新爬取的数据
+    target_table = "movies"
+    if tag and no_clear:
+        target_table = f"movies_{tag}"
+    repo.set_table(target_table)
     
     base_url = "https://movie.douban.com/top250"
     if crawl_type == "tag":
@@ -322,12 +360,13 @@ def api_crawl():
 
     def task():
         try:
-            print(f"Starting Background Crawl: {crawl_type}, Pages: {pages}")
+            print(f"Starting Background Crawl: {crawl_type}, Pages: {pages}, Limit: {limit}")
             main.run_crawl(
                 base_url=base_url,
                 tag=tag,
                 pages=pages,
-                delay=1.0, # 默认延迟
+                limit=limit, # 传递 limit
+                delay=3.0, # 增加延迟防封 (3秒)
                 db_path="data/movie.db",
                 clear=not no_clear,
                 verbose=False,
@@ -363,7 +402,7 @@ def api_crawl():
 @app.route("/api/cluster/data")
 def clustering_data():
     try:
-        k = int(request.args.get("k", 5)) # 默认为 5 类
+        k = int(request.args.get("k", 10)) # 默认为 10 类
         # 限制 k 在 2 到 20 之间，防止错误
         k = max(2, min(k, 20))
         
@@ -377,5 +416,23 @@ def clustering_data():
         return jsonify({"error": str(e)}), 500
 
 
+# ----------------- 知识图谱路由 -----------------
+
+
+
+@app.route("/api/graph/data")
+@login_required
+def graph_data():
+    try:
+        # 默认展示 Top 80 人物，防止图太大卡顿
+        limit = int(request.args.get("limit", 80))
+        service = GraphService(repo)
+        data = service.build_graph(limit_nodes=limit)
+        return jsonify(data)
+    except Exception as e:
+        print(f"Graph Error: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
 if __name__ == "__main__":
-    app.run(debug=True, port=5001)
+    app.run(debug=True, port=5002)

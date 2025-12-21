@@ -12,9 +12,10 @@
                 <span class="badge bg-success">当前表: {{ current_table }}</span>
             </div>
             <div class="card-body p-4">
-                <form action="{{ url_for('switch_table') }}" method="post" class="row g-3 align-items-end">
+                <!-- 1. 切换表单 -->
+                <form action="{{ url_for('switch_table') }}" method="post" class="row g-3 mb-4">
                     <div class="col-md-8">
-                        <label for="tableName" class="form-label fw-bold">选择数据表</label>
+                        <label for="tableName" class="form-label fw-bold">1. 选择数据表 (切换)</label>
                         <select class="form-select" id="tableName" name="table_name">
                             {% for table in tables %}
                             <option value="{{ table }}" {% if table==current_table %}selected{% endif %}>
@@ -22,12 +23,38 @@
                             </option>
                             {% endfor %}
                         </select>
-                        <div class="form-text">切换后，所有页面将展示选定表的数据。</div>
+                        <div class="form-text">当前查看的数据表是: <span class="fw-bold text-success">{{ current_table }}</span>
+                        </div>
+                    </div>
+                    <div class="col-md-4 align-self-center">
+                        <div class="d-grid">
+                            <button type="submit" class="btn btn-primary">
+                                <i class="fas fa-exchange-alt me-2"></i> 确认切换
+                            </button>
+                        </div>
+                    </div>
+                </form>
+
+                <hr class="text-muted opacity-25 my-4">
+
+                <!-- 2. 重命名表单 -->
+                <form action="{{ url_for('rename_table') }}" method="post" class="row g-3 align-items-center">
+                    <input type="hidden" name="old_name" value="{{ current_table }}">
+                    <div class="col-md-8">
+                        <label for="newName" class="form-label fw-bold">
+                            <i class="fas fa-edit me-1"></i> 2. 重命名当前表 ({{ current_table }})
+                        </label>
+                        <div class="input-group">
+                            <span class="input-group-text bg-white">新名称</span>
+                            <input type="text" class="form-control" id="newName" name="new_name"
+                                placeholder="例如: movies_备份, movies_2024" required>
+                        </div>
                     </div>
                     <div class="col-md-4">
                         <div class="d-grid">
-                            <button type="submit" class="btn btn-outline-success">
-                                <i class="fas fa-exchange-alt me-2"></i> 切换数据表
+                            <button type="submit" class="btn btn-outline-warning"
+                                onclick="return confirm('⚠️ 警告：\n确认重命名吗？\n\n重命名后，原表将移动到新名称。');">
+                                重命名
                             </button>
                         </div>
                     </div>
@@ -73,13 +100,21 @@
                     <!-- 3. 选项配置 -->
                     <div class="row g-3 mb-4">
                         <div class="col-md-6">
-                            <label for="pages" class="form-label fw-bold">爬取页数</label>
-                            <select class="form-select" id="pages" name="pages">
-                                <option value="1">1 页 (约20部)</option>
-                                <option value="3">3 页 (约60部)</option>
-                                <option value="5">5 页 (约100部)</option>
-                                <option value="10" selected>10 页 (完整榜单 / 约200部)</option>
-                            </select>
+                            <div id="pagesInputGroup">
+                                <label for="pages" class="form-label fw-bold">爬取页数 (Top 250)</label>
+                                <select class="form-select" id="pages" name="pages">
+                                    <option value="1">1 页 (约25部)</option>
+                                    <option value="3">3 页 (约75部)</option>
+                                    <option value="5">5 页 (约125部)</option>
+                                    <option value="10" selected>10 页 (完整榜单 / 约250部)</option>
+                                </select>
+                            </div>
+                            <div id="limitInputGroup" style="display: none;">
+                                <label for="limit" class="form-label fw-bold">爬取数量 (Tag 模式)</label>
+                                <input type="number" class="form-control" id="limit" name="limit" value="50" min="1"
+                                    max="500">
+                                <div class="form-text">一次性请求的数量 (建议 20-200)</div>
+                            </div>
                         </div>
                         <div class="col-md-6">
                             <label class="form-label fw-bold">数据存储策略</label>
@@ -125,14 +160,29 @@
 </div>
 {% endblock %}
 
+<!-- Rename Modal -->
+
+
 {% block scripts %}
 {{ super() }}
 <script>
     // 标签输入框的 UI 切换
+    // 标签输入框的 UI 切换
     document.querySelectorAll('input[name="crawl_type"]').forEach((elem) => {
         elem.addEventListener("change", function (event) {
             const tagGroup = document.getElementById('tagInputGroup');
-            tagGroup.style.display = event.target.value === "tag" ? "block" : "none";
+            const limitGroup = document.getElementById('limitInputGroup');
+            const pagesGroup = document.getElementById('pagesInputGroup');
+
+            if (event.target.value === "tag") {
+                tagGroup.style.display = "block";
+                limitGroup.style.display = "block";
+                pagesGroup.style.display = "none";
+            } else {
+                tagGroup.style.display = "none";
+                limitGroup.style.display = "none";
+                pagesGroup.style.display = "block";
+            }
         });
     });
 
@@ -161,8 +211,8 @@
                         statusTitle.className = "fw-bold mb-1 text-success";
                         document.getElementById('loadingSpinner').style.display = "none";
                         setTimeout(() => {
-                            alert("爬取成功！");
-                            window.location.href = "{{ url_for('index') }}";
+                            alert("爬取成功！请在上方下拉菜单中切换到新数据表查看。");
+                            window.location.reload();
                         }, 1000);
                     } else if (data.status === 'error') {
                         clearInterval(pollInterval);
