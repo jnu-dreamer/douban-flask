@@ -2,11 +2,71 @@
 {% block title %}豆瓣电影 - 数据大屏{% endblock %}
 {% block head_extra %}
 <script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
+<style>
+    /* 打印报告模式样式 - 强制显示所有 Tab 并隐藏干扰项 */
+    body.report-mode {
+        background: white !important;
+        overflow: auto !important;
+    }
+
+    body.report-mode #accordionSidebar,
+    body.report-mode .topbar,
+    body.report-mode footer,
+    body.report-mode .nav-tabs,
+    body.report-mode #ai-assistant-container,
+    body.report-mode .btn,
+    body.report-mode .data-toolbox {
+        /* 隐藏按钮和工具箱 */
+        display: none !important;
+    }
+
+    body.report-mode #content-wrapper {
+        margin: 0 !important;
+        padding: 0 !important;
+        background: white !important;
+    }
+
+    body.report-mode .container-fluid {
+        padding: 0 !important;
+        max-width: 100% !important;
+    }
+
+    body.report-mode .tab-content>.tab-pane {
+        display: block !important;
+        /* 强制显示所有 Tab */
+        opacity: 1 !important;
+        border: none !important;
+        margin-bottom: 50px;
+        page-break-inside: avoid;
+        /* 防止分页截断图表 */
+    }
+
+    body.report-mode .card {
+        box-shadow: none !important;
+        border: 1px solid #eee !important;
+    }
+
+    @media print {
+        @page {
+            size: A4;
+            margin: 10mm;
+        }
+
+        body {
+            -webkit-print-color-adjust: exact;
+        }
+    }
+</style>
 {% endblock %}
 {% block content %}
-<div class="mb-4">
-    <h3 class="h3 fw-bold text-gray-800">数据大屏</h3>
-    <p class="text-muted">全方位探索电影数据的分布、趋势与语义关联</p>
+<div class="d-sm-flex align-items-center justify-content-between mb-4">
+    <div>
+        <h3 class="h3 fw-bold text-gray-800">数据大屏</h3>
+        <p class="text-muted">全方位探索电影数据的分布、趋势与语义关联</p>
+    </div>
+    <button onclick="enterReportMode()" class="btn btn-sm btn-primary shadow-sm">
+        <i class="bi bi-file-earmark-pdf-fill me-1"></i> 生成分析报告
+    </button>
 </div>
 
 <!-- 导航标签页 -->
@@ -43,19 +103,42 @@
         <!-- 数据工具箱 -->
         <div class="row mb-4">
             <div class="col-12">
-                <div class="card shadow border-0 rounded-3">
+                <div class="card shadow border-0 rounded-3" style="position: relative; z-index: 1050;">
                     <div class="card-body d-flex justify-content-between align-items-center bg-light rounded-3">
                         <div>
                             <h5 class="fw-bold text-dark mb-1"><i class="bi bi-tools me-2 text-primary"></i>数据工具箱</h5>
                             <span class="text-muted small">您可以导出当前数据或生成可视化词云报告</span>
                         </div>
                         <div>
-                            <a href="{{ url_for('word') }}" class="btn btn-outline-primary me-2">
-                                <i class="bi bi-cloud me-1"></i> 词云概览
-                            </a>
-                            <a href="{{ url_for('export_data') }}" class="btn btn-success">
-                                <i class="bi bi-file-earmark-excel me-1"></i> 导出 Excel
-                            </a>
+                            <div class="btn-group">
+                                <a href="{{ url_for('word') }}" class="btn btn-outline-primary">
+                                    <i class="bi bi-cloud me-1"></i> 词云概览
+                                </a>
+                                <button type="button" class="btn btn-success dropdown-toggle dropdown-toggle-split"
+                                    data-bs-toggle="dropdown" aria-expanded="false">
+                                    <span class="visually-hidden">Toggle Dropdown</span>
+                                    <i class="bi bi-download me-1"></i> 导出数据
+                                </button>
+                                <ul class="dropdown-menu dropdown-menu-end">
+                                    <li>
+                                        <h6 class="dropdown-header">基础数据</h6>
+                                    </li>
+                                    <li><a class="dropdown-item" href="{{ url_for('export_data') }}"><i
+                                                class="bi bi-table me-2"></i>电影明细列表 (Excel)</a></li>
+                                    <li>
+                                        <hr class="dropdown-divider">
+                                    </li>
+                                    <li>
+                                        <h6 class="dropdown-header">高级报表</h6>
+                                    </li>
+                                    <li><a class="dropdown-item" href="{{ url_for('export_stats') }}"><i
+                                                class="bi bi-bar-chart-steps me-2"></i>统计分析报表 (评分/地区/年份)</a></li>
+                                    <li><a class="dropdown-item" href="{{ url_for('export_graph') }}"><i
+                                                class="bi bi-share me-2"></i>人物关系图谱 (Nodes/Edges)</a></li>
+                                    <li><a class="dropdown-item" href="{{ url_for('export_keywords') }}"><i
+                                                class="bi bi-tags me-2"></i>词云关键词表 (TF-IDF)</a></li>
+                                </ul>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -146,7 +229,7 @@
             <div class="card-body">
                 <div id="clusterChart" style="height: 600px; width: 100%;"></div>
                 <div class="mt-3 text-muted small text-center">
-                    * 坐标点越接近，说明两部电影的剧情关键词越相似。此图通过 TF-IDF 特征提取 + PCA 降维生成。
+                    * 坐标点越接近，说明两部电影的剧情关键词越相似。此图通过 TF-IDF 特征提取 + t-SNE 降维生成。
                 </div>
             </div>
         </div>
@@ -160,8 +243,10 @@
                 class="card-header py-3 d-flex flex-row align-items-center justify-content-between bg-white border-bottom">
                 <h6 class="m-0 fw-bold text-indigo" style="color: #6610f2;">导演-演员合作关系图谱 (Relationship Graph)</h6>
                 <div class="d-flex align-items-center">
-                    <span class="badge me-2" style="background-color: #5470c6;">导演</span>
-                    <span class="badge bg-success me-3">演员</span>
+                    <select id="graphLayout" class="form-select form-select-sm me-3" style="width: auto;">
+                        <option value="force" selected>力导向图 (Force)</option>
+                        <option value="circular">环形图 (Circular)</option>
+                    </select>
                     <button class="btn btn-sm btn-outline-secondary" onclick="loadGraphChart()">
                         <i class="bi bi-arrow-clockwise"></i> 刷新
                     </button>
@@ -229,7 +314,11 @@
                 tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
                 grid: { left: '3%', right: '4%', bottom: '3%', containLabel: true },
                 xAxis: { type: 'value', boundaryGap: [0, 0.01] },
-                yAxis: { type: 'category', data: countryLabels },
+                yAxis: {
+                    type: 'category',
+                    data: countryLabels,
+                    inverse: true,
+                },
                 series: [{
                     name: '数量',
                     type: 'bar',
@@ -291,6 +380,7 @@
             scoreChart = echarts.init(document.getElementById('scoreChart'));
             scoreChart.setOption({
                 tooltip: { trigger: 'axis' },
+                toolbox: { feature: { saveAsImage: {}, magicType: { type: ['line', 'bar'] }, restore: {} }, right: 20 },
                 grid: { left: '3%', right: '4%', bottom: '3%', containLabel: true },
                 xAxis: { type: 'category', data: scoreLabels, name: '评分' },
                 yAxis: { type: 'value', name: '数量' },
@@ -306,6 +396,7 @@
             yearChart = echarts.init(document.getElementById('yearChart'));
             yearChart.setOption({
                 tooltip: { trigger: 'axis' },
+                toolbox: { feature: { saveAsImage: {}, magicType: { type: ['line', 'bar'] }, restore: {} }, right: 20 },
                 grid: { left: '3%', right: '4%', bottom: '3%', containLabel: true },
                 xAxis: { type: 'category', data: yearLabels, name: '年份' },
                 yAxis: { type: 'value', name: '数量' },
@@ -413,27 +504,35 @@
             .then(data => {
                 graphChart.hideLoading();
 
+                const layoutType = document.getElementById('graphLayout').value;
+
                 const option = {
-                    backgroundColor: '#f8f9fc',
+                    backgroundColor: '#ffffff',
+                    color: ['#764ba2', '#ff6b6b'],
                     title: {
                         text: 'Top 80 影人合作网络',
                         subtext: '节点越大表示作品越多，连线越粗表示合作越密切',
-                        top: 'bottom',
-                        left: 'right'
+                        top: '20',
+                        left: 'center',
+                        textStyle: { fontWeight: 'bold', color: '#333' }
                     },
                     tooltip: {},
+                    toolbox: {
+                        feature: { saveAsImage: { pixelRatio: 2 }, restore: {} },
+                        right: 20
+                    },
                     legend: [{
-                        data: data.categories.map(function (a) {
-                            return a.name;
-                        })
+                        data: data.categories.map(function (a) { return a.name; }),
+                        bottom: 20
                     }],
-                    animationDuration: 1500,
-                    animationEasingUpdate: 'quinticInOut',
                     series: [
                         {
                             type: 'graph',
-                            layout: 'force',
-                            data: data.nodes,
+                            layout: layoutType, // 动态读取布局
+                            data: data.nodes.map(n => ({
+                                ...n,
+                                itemStyle: { shadowBlur: 5, shadowColor: 'rgba(0,0,0,0.3)' }
+                            })),
                             links: data.links,
                             categories: data.categories,
                             roam: true,
@@ -443,20 +542,24 @@
                                 formatter: '{b}'
                             },
                             draggable: true,
-                            force: {
-                                repulsion: 400,
-                                edgeLength: [50, 200],
-                                gravity: 0.1
-                            },
+                            // 根据布局类型切换配置
+                            force: layoutType === 'force' ? {
+                                repulsion: 800,
+                                edgeLength: [80, 250],
+                                gravity: 0.05
+                            } : undefined,
+                            circular: layoutType === 'circular' ? {
+                                rotateLabel: true
+                            } : undefined,
+
                             lineStyle: {
                                 color: 'source',
-                                curveness: 0.3
+                                curveness: 0.3, // 稍微加大曲率
+                                opacity: 0.6
                             },
                             emphasis: {
                                 focus: 'adjacency',
-                                lineStyle: {
-                                    width: 10
-                                }
+                                lineStyle: { width: 8, opacity: 1 }
                             }
                         }
                     ]
@@ -586,5 +689,44 @@
     document.addEventListener("DOMContentLoaded", handleHashNavigation);
     window.addEventListener("hashchange", handleHashNavigation);
 
+    // ----------------- 报告生成逻辑 -----------------
+    window.enterReportMode = function () {
+        const body = document.body;
+
+        // 1. 进入报告模式
+        body.classList.add('report-mode');
+
+        // 2. 确保所有图表数据已加载 (如果还没点开过 Tab)
+        if (typeof initOverviewCharts === 'function') initOverviewCharts();
+        if (typeof initTrendCharts === 'function') initTrendCharts();
+        if (typeof loadClusterChart === 'function' && !clusterChart) loadClusterChart();
+        if (typeof loadGraphChart === 'function' && !graphChart) loadGraphChart();
+
+        // 3. 强制重绘所有图表以适应新布局 (展开所有 Tab 后尺寸会变)
+        // 增加等待时间，确保 AJAX 请求完成且图表渲染完毕
+        setTimeout(() => {
+            [mapChart, genreChart, countryChart, scoreChart, yearChart, clusterChart, graphChart].forEach(chart => {
+                if (chart) chart.resize();
+            });
+
+            // 4. 给浏览器充足时间渲染 (ECharts 动画通常需要 1-2秒)
+            setTimeout(() => {
+                window.print();
+
+                // 5. 打印完成后自动退出
+                if (confirm("打印完成？点击确定退出报告模式。")) {
+                    exitReportMode();
+                }
+            }, 2000);
+        }, 1500);
+    }
+
+    window.exitReportMode = function () {
+        document.body.classList.remove('report-mode');
+        // 重新触发 Resize 以恢复正常布局
+        window.dispatchEvent(new Event('resize'));
+    }
+
 </script>
+
 {% endblock %}

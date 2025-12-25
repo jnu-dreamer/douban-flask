@@ -48,9 +48,8 @@ class ClusteringService:
             return None
 
         # 2. 特征工程：构建混合语料
-        # 策略：简介 + (类型 * 3) + (导演 * 3) + (系列名 * 10)
-        # 为什么？类型和导演是强分类特征，应该赋予更高权重
-        # 系列名 (如 "哈利波特") 是最强特征，用于强制将续集聚类在一起
+        # 策略：简介 + (类型 * 3) + (导演 * 5) + (系列名 * 10)
+        # 系列名用于强制将续集聚类在一起
         corpus = []
         titles = []
         ids = []
@@ -62,13 +61,13 @@ class ClusteringService:
             
             # 处理类型 (Type is at index 7) - 假设 Type 是 "剧情 犯罪" 这样的字符串
             genre = self._clean_text(m[7])
-            genre_words = [w for w in jieba.cut(genre)] * 3  # 增加权重: 重复2次
+            genre_words = [w for w in jieba.cut(genre)] * 3
             
             # 处理导演 (Director is at index 10)
             director = self._clean_text(m[10]) # 假设 index 10 是导演
-            director_words = [w for w in jieba.cut(director)] * 5 # 增加权重: 重复2次
+            director_words = [w for w in jieba.cut(director)] * 5
 
-            # 处理系列名 (特判功能: 强行聚合续集/季)
+            # 处理系列名，聚合续集/季
             title = m[3]
             series_token = self._get_series_token(title)
             # 极高权重：让 TF-IDF 认为这是最重要的特征
@@ -82,8 +81,7 @@ class ClusteringService:
             ids.append(m[1])
 
         # 3. TF-IDF 向量化
-        # 增加 N-gram 支持 (1-gram 和 2-gram)，捕获固定搭配
-        vectorizer = TfidfVectorizer(max_features=20, ngram_range=(1, 2))
+        vectorizer = TfidfVectorizer(max_features=20, ngram_range=(1, 2)) # N-gram 支持 (1-gram 和 2-gram)，捕获固定搭配
         X = vectorizer.fit_transform(corpus)
         
         # 调试输出：打印被选中的关键词 (Top 20)
@@ -93,29 +91,18 @@ class ClusteringService:
         print("-" * 50)
 
         # 4. K-Means 聚类
-        # n_init=10: 运行10次取最优，防止陷入局部最优
-        kmeans = KMeans(n_clusters=n_clusters, random_state=2025, n_init=100)
+        kmeans = KMeans(n_clusters=n_clusters, random_state=2025, n_init=100) # n_init=10: 运行10次取最优，防止陷入局部最优
         labels = kmeans.fit_predict(X)
 
         # 5. t-SNE 降维 (非线性降维，能有效解决点挤在一起的问题)
-        # K-Means 已经给出了聚类标签，t-SNE 负责把这些高维数据漂亮地画在二维平面上
         n_samples = X.shape[0]
         
-        # Perplexity (困惑度): 决定了每个点"看"多远的邻居。
-        # 经典值通常在 30-50。之前值太小导致局部过于破碎或无法形成有效引力。
-        # 数据量少时 (<100)，perplex 应更小；数据量大时 (~250)，30 是好选择。
-        perplex = 50
+        perplex = min(50, max(5, n_samples - 1))
         
-        # early_exaggeration: 控制簇与簇之间的间距。
-        # 默认 12。之前设为 200 太激进了，可能导致所有点被迫聚集在极少数位置。
-        # 改回 24，适度增加分离度但保持自然分布。
-        # learning_rate: 学习率。设为 2 会导致点“跑不动”，保持在初始位置混在一起。改回 'auto'。
-        # early_exaggeration: 保持 24，让聚类适度分散。
         tsne = TSNE(n_components=2, perplexity=perplex, early_exaggeration=24, random_state=2025, init='pca', learning_rate='auto')
         coords = tsne.fit_transform(X.toarray())
 
         # 6. 格式化输出供 ECharts 使用
-        # 结构: [{name: 'Cluster 1', data: [[x, y, title, link], ...]}, ...]
         result = []
         for i in range(n_clusters):
             cluster_points = []

@@ -5,13 +5,15 @@ import urllib.request # 用于处理URL请求
 from urllib.parse import quote # URL编码
 from typing import Dict, List, Optional # 用于类型提示
 from bs4 import BeautifulSoup # 用于解析HTML
+from utils.logger import logger # 导入日志模块
 
 
 class DoubanSpider:
     """豆瓣电影列表爬虫 (支持 Top250 或指定标签)."""
-    def __init__(self, base_url: str = "https://movie.douban.com/top250", tag: str = "", pages: int = 10, limit: int = 200, delay: float = 1.0):
+    def __init__(self, base_url: str = "https://movie.douban.com/top250", tag: str = "", sort: str = "recommend", pages: int = 10, limit: int = 200, delay: float = 1.0, start: int = 0):
         self.base_url = base_url.rstrip("/")
         self.tag = tag
+        self.sort = sort
         if self.tag:
             # base_url 用作HTTP请求头的Referer，API请求用作URL
             self.base_url = f"https://movie.douban.com/tag/{quote(self.tag)}"
@@ -19,6 +21,7 @@ class DoubanSpider:
         self.pages = pages
         self.limit = limit
         self.delay = delay
+        self.start = start # 新增 start 参数
         self.headers = { # 设置HTTP头，伪装为Chrome浏览器
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
         }
@@ -35,22 +38,61 @@ class DoubanSpider:
         """
         records: List[Dict[str, str]] = [] 
         
-        # 模式一：标签搜索 (API 一次性请求)
+        # 模式一：标签搜索 (使用 j/new_search_subjects API)
         if self.tag:
-            url = f"https://movie.douban.com/j/search_subjects?type=movie&tag={quote(self.tag)}&sort=recommend&page_limit={self.limit}&page_start=0"
             self.headers.update({"Referer": f"https://movie.douban.com/tag/{quote(self.tag)}"})
+            start = self.start # 使用传入的 start 作为起点
+            batch_size = 20
             
-            print(f"Fetching API {url} ...")
-            if progress_callback:
-                progress_callback(1, 1)
+            # 映射排序参数
+            # T: 热度 (Hot), S: 评分 (Score), R: 上映日期 (Release)
+            sort_map = {
+                "recommend": "T",
+                "rank": "S", 
+                "time": "R",
+                "recent": "U" 
+            }
+            api_sort = sort_map.get(self.sort, "T")
 
-            content = self._get(url)
-            if content:
+            while len(records) < self.limit:
+                remaining = self.limit - len(records)
+                current_limit = min(batch_size, remaining)
+                
+                # 使用新版 API，支持更丰富的筛选
+                # tags: tags=2023, tags=喜剧
+                # range: 0,10 (默认全范围)
+                url = f"https://movie.douban.com/j/new_search_subjects?sort={api_sort}&range=0,10&tags={quote(self.tag)}&start={start}"
+                
+                logger.info(f"Fetching API {url} ...")
+                if progress_callback:
+                    progress_callback(len(records), self.limit)
+
+                content = self._get(url)
+                if not content:
+                    logger.warning("Empty response from API")
+                    break
+                    
                 batch = self._parse_json(content)
+                if not batch:
+                    logger.info("No more data in response")
+                    break
+                    
+                batch = self._parse_json(content)
+                if not batch:
+                    break
+                
                 if save_callback:
-                    print(f"  > Saving {len(batch)} records...")
+                    logger.info(f"  > Saving {len(batch)} records...")
                     save_callback(batch)
+                
                 records.extend(batch)
+                start += len(batch)
+                
+                if self.delay and len(records) < self.limit:
+                    time.sleep(self.delay)
+            
+            if progress_callback:
+                progress_callback(len(records), self.limit)
                 
         # 模式二：Top 250 (网页分页抓取)
         else:
@@ -62,14 +104,14 @@ class DoubanSpider:
                 url = f"{self.base_url}?start={start}"
                 self.headers.update({"Referer": "https://movie.douban.com/top250"})
 
-                print(f"Fetching {url} ...")
+                logger.info(f"Fetching {url} ...")
                 content = self._get(url)
                 if not content:
                     continue
                 
                 batch = self._parse(content)
                 if save_callback:
-                     print(f"  > Saving {len(batch)} records...")
+                     logger.info(f"  > Saving {len(batch)} records...")
                      save_callback(batch)
                 records.extend(batch)
                     
@@ -79,31 +121,44 @@ class DoubanSpider:
 
     def _get(self, url: str) -> str:
         request = urllib.request.Request(url, headers=self.headers)
-        try:
-            # 设置超时时间为 5 秒，防止长时间卡死
-            with urllib.request.urlopen(request, timeout=5) as resp:
-                return resp.read().decode("utf-8")
-        except Exception as e:
-            # 捕获超时或其他错误
-            print(f"Request Error for {url}: {e}")
-            return ""
+        
+        # 重试机制：最多尝试3次
+        for attempt in range(3):
+            try:
+                # 增加超时时间到 15 秒，应对网络波动
+                with urllib.request.urlopen(request, timeout=15) as resp:
+                    return resp.read().decode("utf-8")
+            except Exception as e:
+                logger.warning(f"Request Error for {url} (Attempt {attempt+1}/3): {e}")
+                if attempt < 2:
+                    time.sleep(2 * (attempt + 1)) # 失败后稍微等待 2s, 4s 再重试
+                else:
+                    logger.error(f"Failed to fetch {url} after 3 attempts.")
+                    return ""
 
     def _parse_json(self, json_str: str) -> List[Dict[str, str]]:
         import json
         records: List[Dict[str, str]] = []
         try:
             data = json.loads(json_str)
-            subjects = data.get("subjects", [])
+            # 兼容新旧 API: new -> "data", old -> "subjects"
+            subjects = data.get("data") if "data" in data else data.get("subjects", [])
+            
             for sub in subjects:
-                # API 返回有限字段: rate, title, url, cover, is_new, id
+                # API 返回有限字段: rate, title, url, cover, is_new, id, casts, directors
                 # 我们将其映射到我们的 schema
                 
                 info_link = sub.get("url", "")
                 
                 # 获取详情以补充缺失字段
-                print(f"  > Fetching details for {sub.get('title', '')} ...")
+                # 注意: 即使新API有 casts/directors, 我们仍需 get_details 获取 introduction, country 等
+                logger.debug(f"  > Fetching details for {sub.get('title', '')} ...")
                 details = self._get_movie_details(info_link)
 
+                # 优先使用 API 提供的 metadata (如果有), 否则用详情页数据
+                # New API: directors, casts are lists of strings or objects. Old API: absent or diff.
+                # Safe strategy: trust get_movie_details for deep info, use API for basic ID/Score
+                
                 records.append({
                     "info_link": info_link,
                     "pic_link": sub.get("cover", ""),
@@ -111,14 +166,18 @@ class DoubanSpider:
                     "score": sub.get("rate", "0"),
                     "rated": details["rated"], 
                     "introduction": details["introduction"],
-                    "year_release": sub.get("year") or details["year"], 
+                    "year_release": sub.get("year") or details["year"], # Try API year first
                     "country": details["country"], 
                     "category": details["category"] if details["category"] else self.tag, 
                     "directors": details["directors"],
                     "actors": details["actors"],
                 })
+
+                # 关键修复：在每部电影详情抓取后等待，防止请求过快
+                if self.delay:
+                    time.sleep(self.delay)
         except json.JSONDecodeError:
-            print("Failed to decode JSON response")
+            logger.error("Failed to decode JSON response")
         return records
 
     def _get_movie_details(self, url: str) -> Dict[str, str]:
@@ -183,7 +242,7 @@ class DoubanSpider:
                 details["actors"] = " ".join([a.get_text(strip=True) for a in acts[:5]]) # 仅取前5
 
         except Exception as e:
-            print(f"Failed to fetch details for {url}: {e}")
+            logger.warning(f"Failed to fetch details for {url}: {e}")
             
         return details
 
@@ -243,7 +302,7 @@ class DoubanSpider:
                             list_category = m.group(3).strip()
 
             # --- 关键修改：进入详情页抓取完整信息 ---
-            print(f"  > Fetching details for {cname} ...")
+            logger.debug(f"  > Fetching details for {cname} ...")
             details = self._get_movie_details(info_link)
             
             # 合并逻辑：优先使用详情页信息，列表页信息兜底

@@ -62,20 +62,59 @@
         </div>
     </div>
 
-    <!-- 相似推荐 -->
-    <div class="row mt-5 mb-5">
+    <!-- 推荐 1: Embedding (语义理解) -->
+    <div class="row mt-5">
         <h4 class="mb-4 border-bottom pb-2">
-            <i class="fa fa-thumbs-up text-primary"></i> 猜你喜欢 (基于 TF-IDF 内容聚类)
+            <i class="fas fa-brain" style="color: #6f42c1;"></i> 猜你喜欢 (基于语义 / Embedding)
+            <small class="text-muted fs-6 ms-2">更懂剧情内涵</small>
         </h4>
 
-        {% if recommendations %}
-        {% for rec in recommendations %}
+        {% if rec_embedding %}
+        {% for rec in rec_embedding %}
         <div class="col-md-2 col-6 mb-4">
-            <div class="card h-100 shadow-sm movie-card-hover">
+            <div class="card h-100 shadow-sm movie-card-hover border-0">
                 <div class="position-relative">
                     <img src="{{ rec.pic }}" class="card-img-top" alt="{{ rec.title }}"
-                        style="height: 200px; object-fit: cover;" referrerpolicy="no-referrer">
-                    <span class="position-absolute top-0 end-0 badge bg-warning text-dark m-1">{{ rec.score }}</span>
+                        style="height: 200px; object-fit: cover; border-radius: 0.25rem 0.25rem 0 0;"
+                        referrerpolicy="no-referrer">
+                    <span class="position-absolute top-0 end-0 badge bg-warning text-dark m-1 shadow-sm">{{ rec.score
+                        }}</span>
+                </div>
+                <div class="card-body p-2 text-center">
+                    <h6 class="card-title text-truncate mb-1">
+                        <a href="/movie/{{ rec.id }}" class="text-decoration-none text-dark stretched-link">{{ rec.title
+                            }}</a>
+                    </h6>
+                    <small class="text-muted d-block">{{ rec.year or '' }}</small>
+                    <small class="text-secondary" style="font-size: 0.75rem;">相似度 {{ rec.similarity }}%</small>
+                </div>
+            </div>
+        </div>
+        {% endfor %}
+        {% else %}
+        <div class="col-12 text-center text-muted p-4">
+            <p>暂无语义推荐数据 (可能是索引正在构建中)</p>
+        </div>
+        {% endif %}
+    </div>
+
+    <!-- 推荐 2: TF-IDF (关键词) -->
+    <div class="row mt-2 mb-5">
+        <h4 class="mb-4 border-bottom pb-2">
+            <i class="fas fa-tags text-primary"></i> 猜你喜欢 (基于关键词 / TF-IDF)
+            <small class="text-muted fs-6 ms-2">匹配导演、类型</small>
+        </h4>
+
+        {% if rec_tfidf %}
+        {% for rec in rec_tfidf %}
+        <div class="col-md-2 col-6 mb-4">
+            <div class="card h-100 shadow-sm movie-card-hover border-0">
+                <div class="position-relative">
+                    <img src="{{ rec.pic }}" class="card-img-top" alt="{{ rec.title }}"
+                        style="height: 200px; object-fit: cover; border-radius: 0.25rem 0.25rem 0 0;"
+                        referrerpolicy="no-referrer">
+                    <span class="position-absolute top-0 end-0 badge bg-warning text-dark m-1 shadow-sm">{{ rec.score
+                        }}</span>
                 </div>
                 <div class="card-body p-2 text-center">
                     <h6 class="card-title text-truncate mb-1">
@@ -83,14 +122,14 @@
                             }}</a>
                     </h6>
                     <small class="text-muted d-block">{{ rec.year }}</small>
-                    <small class="text-primary d-block mt-1">相似度 {{ rec.similarity }}%</small>
+                    <small class="text-primary" style="font-size: 0.75rem;">相似度 {{ rec.similarity }}%</small>
                 </div>
             </div>
         </div>
         {% endfor %}
         {% else %}
-        <div class="col-12 text-center text-muted p-5">
-            <p>暂无相关推荐</p>
+        <div class="col-12 text-center text-muted p-4">
+            <p>暂无关键词推荐</p>
         </div>
         {% endif %}
     </div>

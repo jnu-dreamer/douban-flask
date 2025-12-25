@@ -1,5 +1,7 @@
 import sqlite3
+import re
 from typing import Dict, Iterable, List, Sequence, Any, Tuple, Optional
+from utils.logger import logger
 
 class MovieRepository:
     """SQLite 电影数据管理辅助类."""
@@ -59,6 +61,32 @@ class MovieRepository:
             return 0
 
         self.create_table_if_not_exists()
+        
+        # --- 去重逻辑 ---
+        with self._connect() as conn:
+            # 1. 获取库中已存在的链接
+            try:
+                existing_rows = conn.execute(f"select info_link from {self.table_name}").fetchall()
+                existing_links = set(r[0] for r in existing_rows)
+            except Exception:
+                # 假如表刚创建或出错，默认无重复
+                existing_links = set()
+        
+        # 2. 过滤掉库里已有的 + 过滤掉本次批次内重复的
+        unique_records = []
+        seen_links = set()
+        
+        for r in records_list:
+            link = r.get("info_link", "")
+            # 如果库里没有 且 本次未添加过
+            if link and link not in existing_links and link not in seen_links:
+                unique_records.append(r)
+                seen_links.add(link)
+        
+        if not unique_records:
+            return 0
+            
+        # 3. 执行插入
         fields: Sequence[str] = (
             "info_link",
             "pic_link",
@@ -74,12 +102,14 @@ class MovieRepository:
         )
         placeholders = ",".join(["?"] * len(fields))
         sql = f"insert into {self.table_name} ({','.join(fields)}) values ({placeholders})"
-        values = [tuple(record.get(f, "") for f in fields) for record in records_list]
+        values = [tuple(record.get(f, "") for f in fields) for record in unique_records]
 
         with self._connect() as conn:
             conn.executemany(sql, values)
             conn.commit()
-        return len(records_list)
+            
+        logger.info(f"  > Batch saved: {len(unique_records)} new, {len(records_list) - len(unique_records)} skipped.")
+        return len(unique_records)
 
     # --- 读取方法 (从 app.py 重构而来) ---
 
@@ -127,11 +157,13 @@ class MovieRepository:
             columns = [info[1] for info in columns_info]
 
         # 2. 构建查询
-        search_fields = ["cname", "category"]
+        search_fields = ["cname", "category", "introduction", "year_release", "score", "rated"]
         if "actors" in columns:
             search_fields.append("actors")
         if "directors" in columns:
             search_fields.append("directors")
+        if "country" in columns:
+            search_fields.append("country")
             
         where_clause = " OR ".join([f"{field} LIKE ?" for field in search_fields])
         sql = f"select * from {self.table_name} where {where_clause}"
@@ -149,19 +181,48 @@ class MovieRepository:
             return conn.execute(f"select * from {self.table_name}").fetchall()
 
     def get_score_distribution(self) -> Tuple[List[str], List[int]]:
-        """获取电影评分分布."""
+        """获取电影评分分布(排除 0 分或无评分数据)."""
         with self._connect() as conn:
-            data = conn.execute(f"select score, count(score) from {self.table_name} group by score order by score").fetchall()
+            sql = f"""
+                select score, count(score) 
+                from {self.table_name} 
+                where score is not null 
+                  and score != '' 
+                  and score != '0' 
+                  and score != '0.0'
+                group by score 
+                order by score
+            """
+            data = conn.execute(sql).fetchall()
         labels = [str(r[0]) for r in data]
         counts = [r[1] for r in data]
         return labels, counts
 
     def get_year_distribution(self) -> Tuple[List[str], List[int]]:
-        """获取电影上映年份分布."""
+        """获取电影上映年份分布(清洗并排序)."""
+        import re
         with self._connect() as conn:
-            data = conn.execute(f"select year_release, count(year_release) from {self.table_name} group by year_release order by year_release").fetchall()
-        labels = [str(r[0]) for r in data]
-        counts = [r[1] for r in data]
+            # 获取所有原始年份字段
+            raw_data = conn.execute(f"select year_release from {self.table_name}").fetchall()
+        
+        from collections import Counter
+        year_counts = Counter()
+        
+        for row in raw_data:
+            val = str(row[0]) if row[0] else ""
+            # 提取4位数字年份 (例如: "2024(中国大陆)" -> "2024")
+            match = re.search(r'(\d{4})', val)
+            if match:
+                year = match.group(1)
+                # 简单过滤异常年份
+                if 1900 <= int(year) <= 2030:
+                    year_counts[year] += 1
+        
+        # 按年份排序
+        sorted_years = sorted(year_counts.keys())
+        labels = sorted_years
+        counts = [year_counts[y] for y in sorted_years]
+        
         return labels, counts
 
     def get_genre_statistics(self) -> List[Dict[str, Any]]:
@@ -187,12 +248,18 @@ class MovieRepository:
         country_data: Dict[str, int] = {}
         for row in rows:
             if not row[0]: continue
-            cts = row[0].split() # 假设为空格分隔
+            # 使用正则分割：同时支持空格和斜杠，排除空字符串
+            # [ /]+ 匹配一个或多个空格或斜杠
+            cts = re.split(r'[ /]+', row[0])
             for c in cts:
-                country_data[c] = country_data.get(c, 0) + 1
+                if c.strip():
+                    country_data[c] = country_data.get(c, 0) + 1
         
-        labels = list(country_data.keys())
-        counts = list(country_data.values())
+        # 按数量倒序排列
+        sorted_data = sorted(country_data.items(), key=lambda x: x[1], reverse=False)
+        
+        labels = [item[0] for item in sorted_data]
+        counts = [item[1] for item in sorted_data]
         return labels, counts
 
     def get_all_category_text(self) -> str:
@@ -212,9 +279,6 @@ class MovieRepository:
         with self._connect() as conn:
             row = conn.execute(f"select * from {self.table_name} where id = ?", (movie_id,)).fetchone()
             if row:
-                # Convert tuple to dict-like object for easier access if needed, or just return tuple
-                # Tuple structure: id(0), info_link(1), pic_link(2), cname(3), score(4), rated(5), 
-                # introduction(6), year(7), country(8), category(9), directors(10), actors(11)
                 return row
             return None
 
@@ -224,6 +288,14 @@ class MovieRepository:
         placeholders = ",".join(["?"] * len(ids))
         with self._connect() as conn:
             return conn.execute(f"select * from {self.table_name} where id in ({placeholders})", ids).fetchall()
+
+    def get_top_genres(self, limit: int = 9) -> List[str]:
+        """获取数量最多的前 N 个电影类型."""
+        all_stats = self.get_genre_statistics()
+        # 按数量倒序排列
+        sorted_stats = sorted(all_stats, key=lambda x: x['value'], reverse=True)
+        # 提取名称
+        return [item['name'] for item in sorted_stats[:limit]]
 
 
 __all__ = ["MovieRepository"]
